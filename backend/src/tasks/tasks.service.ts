@@ -586,14 +586,17 @@ export class TasksService {
   }
 
   async create(dto: CreateTaskDto, user: AuthUser) {
-    if (user.role === UserRole.EMPLOYEE) throw new ForbiddenException();
-    if (dto.assigneeId != null) {
-      const emp = await this.empRepo.findOne({ where: { id: dto.assigneeId } });
+    let assigneeId = dto.assigneeId ?? null;
+    if (user.role === UserRole.EMPLOYEE) {
+      if (!user.employeeId) throw new ForbiddenException();
+      assigneeId = user.employeeId;
+    } else if (assigneeId != null) {
+      const emp = await this.empRepo.findOne({ where: { id: assigneeId } });
       if (!emp) throw new BadRequestException('Assignee not found');
     }
     let departmentId = dto.departmentId ?? null;
-    if (departmentId == null && dto.assigneeId != null) {
-      const emp = await this.empRepo.findOne({ where: { id: dto.assigneeId } });
+    if (departmentId == null && assigneeId != null) {
+      const emp = await this.empRepo.findOne({ where: { id: assigneeId } });
       departmentId = emp?.departmentId ?? null;
     }
     const criteria = this.normalizeCriteria(dto.criteria);
@@ -611,7 +614,7 @@ export class TasksService {
         description: dto.description?.trim() || null,
         projectName: dto.projectName?.trim() || null,
         createdBy: user.id,
-        assigneeId: dto.assigneeId ?? null,
+        assigneeId,
         reviewerEmployeeId: dto.reviewerEmployeeId ?? null,
         collaboratorIds: dto.collaboratorIds?.length
           ? JSON.stringify(dto.collaboratorIds)

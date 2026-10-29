@@ -116,4 +116,9 @@ export class LeaveController {
   ) {
     return this.service.review(id, user, dto.decision, dto.comment);
   }
+
+  @Patch(':id/cancel')
+  cancel(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: any) {
+    return this.service.cancel(id, user);
+  }
 }

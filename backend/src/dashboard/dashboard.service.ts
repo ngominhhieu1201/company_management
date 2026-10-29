@@ -59,39 +59,176 @@ export class DashboardService {
       return this.managerOverview(user);
     }
 
-    const myTasks = (await this.taskRepo.find()).filter(
-      (t) => t.assigneeId === user.employeeId,
-    );
-    const todayAtt = user.employeeId
-      ? await this.attRepo.findOne({
-          where: {
-            employeeId: user.employeeId,
-            workDate: new Date().toISOString().slice(0, 10),
-          },
-        })
+    return this.employeeOverview(user);
+  }
+
+  private async employeeOverview(user: AuthUser) {
+    const today = new Date().toISOString().slice(0, 10);
+    const year = today.slice(0, 4);
+    const monthPrefix = today.slice(0, 7);
+    const empId = user.employeeId;
+
+    const emp = empId
+      ? await this.empRepo.findOne({ where: { id: empId } })
       : null;
-    const myLeave = (await this.leaveRepo.find()).filter(
-      (l) => l.employeeId === user.employeeId,
+    const dept =
+      emp?.departmentId != null
+        ? await this.deptRepo.findOne({ where: { id: emp.departmentId } })
+        : null;
+
+    const myTasks = (await this.taskRepo.find()).filter(
+      (t) => t.assigneeId === empId,
     );
+    const openTasks = myTasks.filter((t) => t.status !== TaskStatus.DONE);
+    const highPriority = openTasks.filter(
+      (t) =>
+        t.priority === TaskPriority.HIGH || t.priority === TaskPriority.URGENT,
+    ).length;
+
+    const priorityTasks = [...openTasks]
+      .sort((a, b) => {
+        const rank = (p: string) =>
+          p === TaskPriority.URGENT
+            ? 0
+            : p === TaskPriority.HIGH
+              ? 1
+              : p === TaskPriority.MEDIUM
+                ? 2
+                : 3;
+        const pr = rank(a.priority) - rank(b.priority);
+        if (pr !== 0) return pr;
+        return String(a.dueDate || '9999').localeCompare(
+          String(b.dueDate || '9999'),
+        );
+      })
+      .slice(0, 5)
+      .map((t) => ({
+        id: t.id,
+        taskCode: t.taskCode || `TSK-${t.id}`,
+        title: t.title,
+        priority: t.priority,
+        status: t.status,
+        progress: t.progress ?? 0,
+        dueDate: t.dueDate,
+        startDate: t.startDate,
+      }));
+
+    const allAtt = empId
+      ? await this.attRepo.find({ where: { employeeId: empId } })
+      : [];
+    const monthAtt = allAtt.filter((r) =>
+      String(r.workDate).startsWith(monthPrefix),
+    );
+    const monthPresent = monthAtt.filter(
+      (r) => !!r.checkInTime || r.status === AttendanceStatus.COMPLETED,
+    ).length;
+    // Approximate working days elapsed this month (Mon–Fri up to today)
+    let monthWorkdays = 0;
+    {
+      const [y, m] = monthPrefix.split('-').map(Number);
+      const cursor = new Date(y, m - 1, 1);
+      const end = new Date(`${today}T00:00:00`);
+      while (cursor <= end) {
+        const dow = cursor.getDay();
+        if (dow !== 0 && dow !== 6) monthWorkdays += 1;
+        cursor.setDate(cursor.getDate() + 1);
+      }
+    }
+    const attendanceRate =
+      monthWorkdays > 0
+        ? Math.round((monthPresent / monthWorkdays) * 1000) / 10
+        : 0;
+
+    const todayAtt = allAtt.find((r) => r.workDate === today) ?? null;
+    let workedMinutes: number | null = null;
+    if (todayAtt?.checkInTime) {
+      const end = todayAtt.checkOutTime
+        ? new Date(todayAtt.checkOutTime).getTime()
+        : Date.now();
+      workedMinutes = Math.max(
+        0,
+        Math.floor((end - new Date(todayAtt.checkInTime).getTime()) / 60000),
+      );
+    }
+
+    const myLeave = (await this.leaveRepo.find()).filter(
+      (l) => l.employeeId === empId,
+    );
+    const pendingLeave = myLeave.filter(
+      (l) => l.status === LeaveStatus.PENDING,
+    );
+    const annualUsed = myLeave
+      .filter(
+        (l) =>
+          l.leaveType === LeaveType.ANNUAL &&
+          l.status === LeaveStatus.APPROVED &&
+          String(l.startDate).startsWith(year),
+      )
+      .reduce((s, l) => s + (l.daysCount ?? 1), 0);
+    const annualQuota = 12;
+    const leaveRemaining = Math.max(0, annualQuota - annualUsed);
+
+    const leavePendingItems = pendingLeave.slice(0, 5).map((l) => ({
+      id: l.id,
+      leaveCode: l.leaveCode || `OFF-${l.id}`,
+      leaveType: l.leaveType,
+      leaveTypeLabel: LEAVE_TYPE_LABEL[l.leaveType] ?? l.leaveType,
+      startDate: l.startDate,
+      endDate: l.endDate,
+      daysCount: l.daysCount ?? 1,
+      reason: l.reason,
+      status: l.status,
+      createdAt: l.createdAt,
+    }));
+
     return {
-      role: user.role,
+      role: UserRole.EMPLOYEE,
+      employeeName: emp?.fullName ?? null,
+      employeeCode: emp?.employeeCode ?? null,
+      position: emp?.position ?? null,
+      departmentName: dept?.name ?? null,
+      departmentCode: dept?.departmentCode ?? null,
       tasksByStatus: this.countBy(myTasks, 'status'),
-      dueSoon: myTasks.filter(
+      openTasks: openTasks.length,
+      highPriorityTasks: highPriority,
+      dueSoon: openTasks.filter(
         (t) =>
           t.dueDate &&
-          t.status !== TaskStatus.DONE &&
           t.dueDate <=
             new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10),
       ).length,
+      priorityTasks,
+      monthPresent,
+      monthWorkdays,
+      attendanceRate,
+      leavePending: pendingLeave.length,
+      leaveRemaining,
+      annualQuota,
+      annualUsed,
+      leavePendingItems,
       attendanceToday: todayAtt
         ? {
+            id: todayAtt.id,
             status: todayAtt.status,
+            checkedIn: !!todayAtt.checkInTime,
             checkInTime: todayAtt.checkInTime,
             checkOutTime: todayAtt.checkOutTime,
+            workedMinutes,
+            shiftLabel: 'Ca hành chính',
+            shiftStart: '08:30',
+            shiftEnd: '17:30',
           }
-        : { status: AttendanceStatus.IN_PROGRESS, checkedIn: false },
-      leavePending: myLeave.filter((l) => l.status === LeaveStatus.PENDING)
-        .length,
+        : {
+            id: null,
+            status: null,
+            checkedIn: false,
+            checkInTime: null,
+            checkOutTime: null,
+            workedMinutes: null,
+            shiftLabel: 'Ca hành chính',
+            shiftStart: '08:30',
+            shiftEnd: '17:30',
+          },
     };
   }
 

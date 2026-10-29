@@ -1,0 +1,424 @@
+/* Employee task create (Screen A) */
+.nx-emp-tc {
+  padding-bottom: 5rem;
+}
+.nx-emp-tc-crumb {
+  margin-bottom: 0.75rem;
+}
+.nx-emp-tc-head {
+  margin-bottom: 1rem;
+}
+.nx-emp-tc-head h1 {
+  margin: 0 0 0.35rem;
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: var(--nx-ink-deep);
+}
+.nx-emp-tc-code-badge {
+  display: inline-flex;
+  padding: 0.2rem 0.65rem;
+  border-radius: 8px;
+  background: #e3f0fd;
+  color: #1565c0;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+.nx-emp-tc-sub {
+  margin: 0.5rem 0 0;
+  color: var(--nx-muted);
+  font-size: 0.88rem;
+  max-width: 42rem;
+}
+.nx-emp-tc-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 1rem;
+  align-items: start;
+}
+.nx-emp-tc-card {
+  background: #fff;
+  border: 1px solid var(--nx-line);
+  border-radius: 16px;
+  padding: 1.1rem 1.15rem;
+  margin-bottom: 1rem;
+  box-shadow: 0 1px 2px rgba(11, 46, 40, 0.04);
+}
+.nx-emp-tc-card h2,
+.nx-emp-tc-card h3 {
+  margin: 0 0 0.85rem;
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #00594c;
+}
+.nx-emp-tc-field {
+  margin-bottom: 0.85rem;
+  position: relative;
+}
+.nx-emp-tc-field label {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--nx-ink);
+  margin-bottom: 0.35rem;
+}
+.nx-emp-tc-field label .req {
+  color: #c62828;
+}
+.nx-emp-tc-field input,
+.nx-emp-tc-field select,
+.nx-emp-tc-field textarea {
+  width: 100%;
+  border: 1px solid var(--nx-line);
+  border-radius: 10px;
+  padding: 0.55rem 0.65rem;
+  font-size: 0.9rem;
+}
+.nx-emp-tc-field input.readonly {
+  background: #f4f7f6;
+  color: var(--nx-muted);
+}
+.nx-emp-tc-count {
+  text-align: right;
+  font-size: 0.72rem;
+  color: var(--nx-muted);
+  margin-top: 0.2rem;
+}
+.nx-emp-tc-tag {
+  display: inline-flex;
+  margin-top: 0.35rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: #eef5f2;
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: #00594c;
+}
+.nx-emp-tc-prio {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+.nx-emp-tc-prio .chip {
+  border: 1px solid var(--nx-line);
+  border-radius: 999px;
+  padding: 0.35rem 0.85rem;
+  background: #fff;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.nx-emp-tc-prio .chip.active {
+  border-color: #00594c;
+  background: #00594c;
+  color: #fff;
+}
+.nx-emp-tc-prio .chip.prio-urgent.active {
+  background: #c62828;
+  border-color: #c62828;
+}
+.nx-emp-tc-row2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+.nx-emp-tc-collab {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.75rem;
+  margin-top: 0.5rem;
+  max-height: 120px;
+  overflow: auto;
+}
+.nx-emp-tc-collab-item {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+.nx-emp-tc-drop {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 88px;
+  border: 2px dashed #c5d5d0;
+  border-radius: 12px;
+  background: #f8fbfb;
+  cursor: pointer;
+  text-align: center;
+  padding: 0.75rem;
+  font-size: 0.82rem;
+  color: var(--nx-muted);
+}
+.nx-emp-tc-files {
+  margin: 0.5rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.82rem;
+}
+.nx-emp-tc-approver .role {
+  display: inline-flex;
+  padding: 0.15rem 0.45rem;
+  border-radius: 6px;
+  background: #00594c;
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+}
+.nx-emp-tc-approver strong {
+  display: block;
+  margin: 0.5rem 0 0.35rem;
+  font-size: 1rem;
+}
+.nx-emp-tc-approver p {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--nx-muted);
+  line-height: 1.45;
+}
+.nx-emp-tc-workload .bar {
+  height: 8px;
+  border-radius: 999px;
+  background: #e8eeec;
+  overflow: hidden;
+}
+.nx-emp-tc-workload .bar span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #00594c, #2a9d8f);
+  border-radius: inherit;
+}
+.nx-emp-tc-workload .nums {
+  margin-top: 0.45rem;
+  font-weight: 800;
+  font-size: 0.9rem;
+}
+.nx-emp-tc-workload .nums em {
+  font-style: normal;
+  font-weight: 600;
+  color: var(--nx-muted);
+  font-size: 0.78rem;
+}
+.nx-emp-tc-workload p {
+  margin: 0.35rem 0 0;
+  font-size: 0.78rem;
+  color: var(--nx-muted);
+}
+.nx-emp-tc-foot {
+  position: sticky;
+  bottom: 0;
+  margin-top: 1rem;
+  padding: 0.85rem 1rem;
+  background: #fff;
+  border: 1px solid var(--nx-line);
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  box-shadow: 0 -4px 24px rgba(11, 46, 40, 0.06);
+}
+.nx-emp-tc-foot .who strong {
+  display: block;
+  font-size: 0.9rem;
+}
+.nx-emp-tc-foot .who span {
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: #00594c;
+  letter-spacing: 0.06em;
+}
+.nx-emp-tc-foot .acts {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.nx-emp-tc-primary {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 800;
+}
+
+/* Employee task detail (Screen B) */
+.nx-emp-td-crumb {
+  margin-bottom: 0.75rem;
+}
+.nx-emp-td-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+.nx-emp-td-badges .code {
+  padding: 0.25rem 0.55rem;
+  border-radius: 8px;
+  background: #e3f0fd;
+  color: #1565c0;
+  font-weight: 800;
+  font-size: 0.78rem;
+}
+.nx-emp-td-module {
+  font-size: 0.82rem;
+  color: var(--nx-muted);
+  margin-bottom: 0.35rem;
+}
+.nx-emp-td-title {
+  margin: 0 0 1rem;
+  font-size: 1.45rem;
+  font-weight: 800;
+  color: var(--nx-ink-deep);
+  line-height: 1.25;
+}
+.nx-emp-td-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 1rem;
+  align-items: start;
+}
+.nx-emp-td-card {
+  background: #fff;
+  border: 1px solid var(--nx-line);
+  border-radius: 16px;
+  padding: 1.1rem 1.15rem;
+  margin-bottom: 1rem;
+}
+.nx-emp-td-card h2,
+.nx-emp-td-card h3 {
+  margin: 0 0 0.75rem;
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #00594c;
+}
+.nx-emp-td-desc-box {
+  background: #f0f7fb;
+  border-radius: 12px;
+  padding: 0.85rem 1rem;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+.nx-emp-td-checklist {
+  margin-top: 1rem;
+  border-top: 1px solid var(--nx-line);
+  padding-top: 0.85rem;
+}
+.nx-emp-td-checklist .head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.78rem;
+}
+.nx-emp-td-checklist ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.nx-emp-td-checklist li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: 8px;
+  margin-bottom: 0.35rem;
+  background: #f6f8f7;
+}
+.nx-emp-td-checklist li.done {
+  background: #e8f5e9;
+}
+.nx-emp-td-field {
+  margin-bottom: 0.75rem;
+}
+.nx-emp-td-field label {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 700;
+  margin-bottom: 0.3rem;
+}
+.nx-emp-td-field input,
+.nx-emp-td-field select,
+.nx-emp-td-field textarea {
+  width: 100%;
+  border: 1px solid var(--nx-line);
+  border-radius: 10px;
+  padding: 0.5rem 0.65rem;
+  font-size: 0.88rem;
+}
+.nx-emp-td-prog-field {
+  margin-bottom: 0.85rem;
+}
+.nx-emp-td-prog-field label {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 700;
+  margin-bottom: 0.35rem;
+}
+.nx-emp-td-prog-field input[type='range'] {
+  width: 100%;
+  accent-color: #00594c;
+}
+.nx-emp-td-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+.nx-emp-td-thread {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+}
+.nx-emp-td-thread li {
+  border-bottom: 1px solid var(--nx-line);
+  padding: 0.65rem 0;
+}
+.nx-emp-td-thread .meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--nx-muted);
+  margin-bottom: 0.25rem;
+}
+.nx-emp-td-thread p {
+  margin: 0;
+  font-size: 0.88rem;
+  white-space: pre-wrap;
+}
+.nx-emp-td-meta {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.nx-emp-td-meta li {
+  margin-bottom: 0.65rem;
+}
+.nx-emp-td-meta span {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--nx-muted);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.nx-emp-td-meta strong {
+  font-size: 0.9rem;
+}
+.nx-emp-td-meta strong.warn {
+  color: #c62828;
+}
+
+@media (max-width: 960px) {
+  .nx-emp-tc-grid,
+  .nx-emp-td-grid,
+  .nx-emp-tc-row2 {
+    grid-template-columns: 1fr;
+  }
+}

@@ -3,6 +3,7 @@ import { Alert, Spinner } from 'react-bootstrap';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
+import EmployeePersonalProfilePage from './EmployeePersonalProfilePage';
 import '../styles/account.css';
 
 type Profile = {
@@ -38,7 +39,7 @@ function fmtDate(iso: string | null) {
   return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-export default function AccountProfilePage() {
+function AccountSecurityPage() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -273,4 +274,12 @@ export default function AccountProfilePage() {
       )}
     </div>
   );
+}
+
+export default function AccountProfilePage() {
+  const { user } = useAuth();
+  if (user?.role === 'EMPLOYEE') {
+    return <EmployeePersonalProfilePage />;
+  }
+  return <AccountSecurityPage />;
 }

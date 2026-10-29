@@ -90,6 +90,7 @@ export default function AttendanceDetailPage() {
   const { id } = useParams();
   const { user } = useAuth();
   const canManage = user?.role === 'ADMIN' || user?.role === 'MANAGER';
+  const isEmployee = user?.role === 'EMPLOYEE';
   const [detail, setDetail] = useState<Detail | null>(null);
   const [loading, setLoading] = useState(true);
   const [flagging, setFlagging] = useState(false);
@@ -148,7 +149,7 @@ export default function AttendanceDetailPage() {
     return (
       <div>
         <Alert variant="danger">{error || 'Không tìm thấy'}</Alert>
-        <Link to="/attendance">← Quay lại danh sách</Link>
+        <Link to={isEmployee ? '/attendance?view=history' : '/attendance'}>← Quay lại danh sách</Link>
       </div>
     );
   }
@@ -161,16 +162,34 @@ export default function AttendanceDetailPage() {
   return (
     <div className="nx-ad-page">
       <nav className="nx-att-crumb nx-ad-crumb">
-        <Link to="/attendance">Quay lại danh sách</Link>
-        <span>›</span>
-        <span>Phân hệ Chấm công</span>
-        <span>›</span>
-        <span className="nx-ad-crumb-here">{detail.recordCode}</span>
+        {isEmployee ? (
+          <>
+            <span>Cá nhân</span>
+            <span>›</span>
+            <Link to="/attendance">Chấm công</Link>
+            <span>›</span>
+            <Link to="/attendance?view=history">Lịch sử công</Link>
+            <span>›</span>
+            <span className="nx-ad-crumb-here">{detail.recordCode}</span>
+          </>
+        ) : (
+          <>
+            <Link to="/attendance">Quay lại danh sách</Link>
+            <span>›</span>
+            <span>Phân hệ Chấm công</span>
+            <span>›</span>
+            <span className="nx-ad-crumb-here">{detail.recordCode}</span>
+          </>
+        )}
       </nav>
 
       <div className="nx-att-head nx-ad-head">
         <div className="nx-ad-head-main">
-          <h1>Chi Tiết Bản Ghi Chấm Công: {detail.employee?.fullName ?? '—'}</h1>
+          <h1>
+            {isEmployee
+              ? 'Chi tiết bản ghi & bằng chứng ảnh'
+              : `Chi Tiết Bản Ghi Chấm Công: ${detail.employee?.fullName ?? '—'}`}
+          </h1>
           <div className="nx-ad-badges">
             <span className="nx-att-code">{detail.employee?.employeeCode}</span>
             <span className={`nx-att-st ${st.cls}`}>{st.label}</span>
@@ -288,9 +307,9 @@ export default function AttendanceDetailPage() {
           </div>
 
           <section className={`nx-ad-card nx-ad-note ${detail.flagged ? 'flagged' : ''}`}>
-            <h3>Ghi chú quản lý</h3>
+            <h3>{isEmployee ? 'Ghi chú bản ghi' : 'Ghi chú quản lý'}</h3>
             {detail.flagged ? (
-              <p>Bản ghi đã gắn cờ đối soát bởi quản lý</p>
+              <p>{isEmployee ? 'Bản ghi đang được quản lý đối soát — liên hệ HR nếu cần giải trình.' : 'Bản ghi đã gắn cờ đối soát bởi quản lý'}</p>
             ) : (
               <p className="muted">
                 Check-in được ghi nhận qua camera trực tiếp trên thiết bị (theo SRS). Ảnh và timestamp

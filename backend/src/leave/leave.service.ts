@@ -419,4 +419,28 @@ export class LeaveService {
     });
     return this.findOne(saved.id, user);
   }
+
+  async cancel(id: number, user: AuthUser) {
+    const req = await this.repo.findOne({ where: { id } });
+    if (!req) throw new NotFoundException('Leave request not found');
+    if (user.role === UserRole.EMPLOYEE) {
+      if (req.employeeId !== user.employeeId) throw new ForbiddenException();
+    } else if (user.role === UserRole.MANAGER) {
+      const scoped = await this.scoped(user);
+      if (!scoped.some((r) => r.id === id)) throw new ForbiddenException();
+    }
+    if (req.status !== LeaveStatus.PENDING) {
+      throw new BadRequestException('Only pending requests can be cancelled');
+    }
+    req.status = LeaveStatus.CANCELLED;
+    const saved = await this.repo.save(req);
+    await this.logs.log({
+      actorUserId: user.id,
+      action: 'LEAVE_CANCELLED',
+      entityType: 'LeaveRequest',
+      entityId: saved.id,
+      metadata: { leaveCode: saved.leaveCode },
+    });
+    return this.findOne(saved.id, user);
+  }
 }

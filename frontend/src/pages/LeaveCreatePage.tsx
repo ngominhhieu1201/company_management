@@ -3,6 +3,17 @@ import { Alert } from 'react-bootstrap';
 import { Link, useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
+import {
+  LEAVE_TYPE_OPTIONS,
+  type LeaveDraft,
+  type LeaveFormat,
+  buildReasonBody,
+  draftKey,
+  effectiveLeaveDays,
+  fmtDate as fmt,
+  fmtDays,
+  workDays,
+} from './leaveEmployeeUtils';
 import '../styles/leave.css';
 
 type Emp = {
@@ -14,27 +25,458 @@ type Emp = {
   status: string;
 };
 
-function workDays(start: string, end: string) {
-  if (!start || !end || end < start) return 0;
-  const a = new Date(start + 'T00:00:00');
-  const b = new Date(end + 'T00:00:00');
-  let n = 0;
-  const c = new Date(a);
-  while (c <= b) {
-    const d = c.getDay();
-    if (d !== 0 && d !== 6) n += 1;
-    c.setDate(c.getDate() + 1);
+type DashEmp = {
+  annualQuota?: number;
+  annualUsed?: number;
+  leaveRemaining?: number;
+  employeeName?: string;
+  position?: string | null;
+  departmentName?: string | null;
+};
+
+function EmployeeLeaveCreatePage() {
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const year = new Date().getFullYear();
+
+  const [dash, setDash] = useState<DashEmp | null>(null);
+  const [managerName, setManagerName] = useState<string | null>(null);
+  const [emps, setEmps] = useState<Emp[]>([]);
+  const [leaveType, setLeaveType] = useState('ANNUAL');
+  const [leaveFormat, setLeaveFormat] = useState<LeaveFormat>('FULL');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [reason, setReason] = useState('');
+  const [handoverId, setHandoverId] = useState('');
+  const [handoverPlan, setHandoverPlan] = useState('');
+  const [attachmentName, setAttachmentName] = useState('');
+  const [error, setError] = useState('');
+  const [msg, setMsg] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const handoverEmp = emps.find((e) => String(e.id) === handoverId);
+  const annualQuota = dash?.annualQuota ?? 12;
+  const annualUsed = dash?.annualUsed ?? 0;
+  const available = dash?.leaveRemaining ?? Math.max(0, annualQuota - annualUsed);
+  const usagePct = annualQuota > 0 ? Math.min(100, (annualUsed / annualQuota) * 100) : 0;
+
+  const days = useMemo(
+    () => effectiveLeaveDays(startDate, endDate, leaveFormat),
+    [startDate, endDate, leaveFormat],
+  );
+  const apiDays = useMemo(() => workDays(startDate, endDate), [startDate, endDate]);
+  const afterSubmit =
+    leaveType === 'ANNUAL' ? Math.max(0, available - days) : available;
+  const eligible = leaveType !== 'ANNUAL' || days <= available;
+  const halfDayNote =
+    (leaveFormat === 'AM' || leaveFormat === 'PM') &&
+    startDate &&
+    endDate &&
+    startDate === endDate &&
+    apiDays === 1;
+
+  useEffect(() => {
+    Promise.all([
+      api.get<DashEmp>('/dashboard'),
+      api.get<Emp[]>('/employees/options'),
+    ])
+      .then(([d, opts]) => {
+        setDash(d.data);
+        setEmps((opts.data as Emp[]).filter((e) => e.status === 'ACTIVE'));
+      })
+      .catch(() => undefined);
+    if (user?.employeeId) {
+      api
+        .get<{ managerName?: string | null }>(`/employees/${user.employeeId}`)
+        .then((r) => setManagerName(r.data.managerName ?? null))
+        .catch(() => undefined);
+    }
+  }, [user?.employeeId]);
+
+  useEffect(() => {
+    if (!user?.employeeId) return;
+    try {
+      const raw = localStorage.getItem(draftKey(user.employeeId));
+      if (!raw) return;
+      const d = JSON.parse(raw) as LeaveDraft;
+      setLeaveType(d.leaveType || 'ANNUAL');
+      setLeaveFormat(d.leaveFormat || 'FULL');
+      setStartDate(d.startDate || '');
+      setEndDate(d.endDate || '');
+      setReason(d.reason || '');
+      setHandoverId(d.handoverId || '');
+      setHandoverPlan(d.handoverPlan || '');
+      setAttachmentName(d.attachmentName || '');
+    } catch {
+      /* ignore */
+    }
+  }, [user?.employeeId]);
+
+  useEffect(() => {
+    if (leaveFormat === 'MULTI') return;
+    if (startDate && !endDate) setEndDate(startDate);
+    if (leaveFormat === 'AM' || leaveFormat === 'PM') {
+      if (startDate) setEndDate(startDate);
+    }
+  }, [leaveFormat, startDate, endDate]);
+
+  function saveDraft() {
+    if (!user?.employeeId) return;
+    const payload: LeaveDraft = {
+      leaveType,
+      leaveFormat,
+      startDate,
+      endDate,
+      reason,
+      handoverId,
+      handoverPlan,
+      attachmentName,
+    };
+    localStorage.setItem(draftKey(user.employeeId), JSON.stringify(payload));
+    setMsg('Đã lưu bản nháp trên thiết bị này');
   }
-  return n;
+
+  async function submit() {
+    if (!startDate || !endDate || days <= 0) {
+      setError('Chọn khoảng ngày hợp lệ (tính ngày làm việc, trừ T7/CN)');
+      return;
+    }
+    if (reason.trim().length < 10) {
+      setError('Lý do xin nghỉ cần tối thiểu 10 ký tự');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      const { data } = await api.post<{ id: number }>('/leave', {
+        leaveType,
+        startDate,
+        endDate,
+        reason: buildReasonBody(reason, handoverPlan, leaveFormat),
+        handoverEmployeeId: handoverId ? Number(handoverId) : undefined,
+        attachmentName: attachmentName.trim() || undefined,
+      });
+      if (user?.employeeId) localStorage.removeItem(draftKey(user.employeeId));
+      navigate(`/leave/${data.id}`);
+    } catch {
+      setError('Gửi đơn thất bại (kiểm tra quỹ phép hoặc thử lại)');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function onDropFile(file: File | null) {
+    if (file) setAttachmentName(file.name);
+  }
+
+  const typeLabel =
+    LEAVE_TYPE_OPTIONS.find((o) => o.value === leaveType)?.label ?? leaveType;
+  const typeOptionLabel =
+    leaveType === 'ANNUAL'
+      ? `${typeLabel} (Hưởng 100% lương — Còn ${fmtDays(available)} ngày)`
+      : typeLabel;
+
+  return (
+    <div className="nx-emp-lv-create">
+      <nav className="nx-emp-lv-create-crumb" aria-label="Breadcrumb">
+        <Link to="/leave">Quay lại danh sách đơn</Link>
+        <span>›</span>
+        <span>Quản trị cá nhân</span>
+        <span>›</span>
+        <span>Phân hệ Nghỉ phép</span>
+        <span>›</span>
+        <span className="current">Tạo đơn nghỉ phép mới</span>
+      </nav>
+
+      <header className="nx-emp-lv-create-head">
+        <div>
+          <h1>Tạo Đơn Nghỉ Phép Mới</h1>
+          <p className="nx-emp-lv-create-sub">
+            {dash?.employeeName || user?.username}
+            {dash?.position ? ` · ${dash.position}` : ''}
+            {dash?.departmentName ? ` · ${dash.departmentName}` : ''}
+          </p>
+        </div>
+      </header>
+
+      {error && (
+        <Alert variant="danger" dismissible onClose={() => setError('')}>
+          {error}
+        </Alert>
+      )}
+      {msg && (
+        <Alert variant="success" dismissible onClose={() => setMsg('')}>
+          {msg}
+        </Alert>
+      )}
+
+      <div className="nx-emp-lv-create-layout">
+        <div className="nx-emp-lv-create-main">
+          <section className="nx-emp-lv-create-card">
+            <div className="nx-lc-field">
+              <label>Loại nghỉ phép</label>
+              <select value={leaveType} onChange={(e) => setLeaveType(e.target.value)}>
+                {LEAVE_TYPE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.value === 'ANNUAL'
+                      ? `${o.label} (Hưởng 100% lương — Còn ${fmtDays(available)} ngày)`
+                      : o.label}
+                  </option>
+                ))}
+              </select>
+              {leaveType === 'ANNUAL' && (
+                <p className="nx-emp-lv-create-tip">
+                  Phép năm chưa dùng hết sẽ được chuyển sang kỳ tiếp theo theo quy định công ty (tối
+                  đa 3 ngày).
+                </p>
+              )}
+            </div>
+
+            <div className="nx-lc-field">
+              <label>Hình thức nghỉ</label>
+              <div className="nx-emp-lv-create-segments" role="group" aria-label="Hình thức nghỉ">
+                {(
+                  [
+                    ['FULL', 'Cả ngày', '08:30 - 17:30'],
+                    ['AM', 'Buổi sáng', '08:30 - 12:00'],
+                    ['PM', 'Buổi chiều', '13:30 - 17:30'],
+                    ['MULTI', 'Nhiều ngày', 'Liên tiếp'],
+                  ] as const
+                ).map(([v, t, h]) => (
+                  <button
+                    key={v}
+                    type="button"
+                    className={leaveFormat === v ? 'active' : ''}
+                    onClick={() => setLeaveFormat(v)}
+                  >
+                    <strong>{t}</strong>
+                    <span>{h}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="nx-emp-lv-create-dates">
+              <div className="nx-lc-field">
+                <label>Từ ngày</label>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                />
+              </div>
+              <div className="nx-lc-field">
+                <label>Đến ngày</label>
+                <input
+                  type="date"
+                  value={endDate}
+                  disabled={leaveFormat === 'AM' || leaveFormat === 'PM'}
+                  onChange={(e) => setEndDate(e.target.value)}
+                />
+              </div>
+            </div>
+
+            {days > 0 && (
+              <div className={`nx-emp-lv-create-days-banner${eligible ? '' : ' warn'}`}>
+                <div>
+                  <div className="title">Tổng số ngày nghỉ tính lương</div>
+                  <div className="value">
+                    <strong>{fmtDays(days)}</strong> ngày làm việc
+                  </div>
+                  <div className="hint">
+                    Hệ thống tự loại trừ thứ Bảy, Chủ nhật và ngày lễ.
+                    {halfDayNote &&
+                      ' Lưu ý: API hiện ghi nhận 1.0 ngày làm việc; hình thức nửa ngày được lưu trong nội dung đơn.'}
+                  </div>
+                </div>
+                <span className={`nx-emp-lv-create-valid${eligible ? ' ok' : ''}`}>
+                  {eligible ? 'HỢP LỆ' : 'VƯỢT QUỸ'}
+                </span>
+              </div>
+            )}
+
+            <div className="nx-lc-field">
+              <label>Lý do xin nghỉ (tối thiểu 10 ký tự)</label>
+              <textarea
+                rows={4}
+                maxLength={500}
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="Mô tả lý do và phạm vi công việc…"
+              />
+              <span className="nx-emp-lv-create-count">{reason.trim().length}/500</span>
+            </div>
+
+            <div className="nx-lc-field">
+              <label>Người nhận bàn giao công việc</label>
+              <select value={handoverId} onChange={(e) => setHandoverId(e.target.value)}>
+                <option value="">— Chọn đồng nghiệp cùng phòng ban —</option>
+                {emps
+                  .filter((e) => e.id !== user?.employeeId)
+                  .map((e) => (
+                    <option key={e.id} value={e.id}>
+                      {e.fullName}
+                      {e.position ? ` · ${e.position}` : ''} ({e.employeeCode})
+                    </option>
+                  ))}
+              </select>
+              {handoverEmp && dash?.departmentName && (
+                <span className="nx-emp-lv-create-dept-badge">
+                  CÙNG PHÒNG BAN {dash.departmentName.toUpperCase()}
+                </span>
+              )}
+            </div>
+
+            <div className="nx-lc-field">
+              <label>Kế hoạch bàn giao công việc</label>
+              <textarea
+                rows={4}
+                maxLength={800}
+                value={handoverPlan}
+                onChange={(e) => setHandoverPlan(e.target.value)}
+                placeholder="Liệt kê task, PR, cuộc họp cần bàn giao…"
+              />
+            </div>
+
+            <div className="nx-lc-field">
+              <label>Đính kèm chứng từ (tuỳ chọn)</label>
+              <div
+                className="nx-lc-dropzone nx-emp-lv-create-drop"
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  onDropFile(e.dataTransfer.files[0] ?? null);
+                }}
+              >
+                <p>Kéo thả tệp PDF, PNG, JPG, JPEG (≤ 10MB)</p>
+                <span>Chỉ lưu tên tệp tham chiếu — không upload nhị phân</span>
+                <label className="nx-lc-drop-btn">
+                  Chọn tệp
+                  <input
+                    type="file"
+                    hidden
+                    accept=".pdf,.png,.jpg,.jpeg"
+                    onChange={(e) => onDropFile(e.target.files?.[0] ?? null)}
+                  />
+                </label>
+                {attachmentName && <div className="nx-lc-drop-name">{attachmentName}</div>}
+              </div>
+            </div>
+
+            <div className="nx-emp-lv-create-foot">
+              <button type="button" className="nx-emp-lv-draft" onClick={saveDraft}>
+                Lưu bản nháp
+              </button>
+              <button
+                type="button"
+                className="nx-btn-primary nx-emp-lv-create-submit"
+                disabled={saving || !eligible}
+                onClick={() => void submit()}
+              >
+                {saving ? 'Đang gửi…' : 'Gửi đơn lên quản lý phê duyệt'}
+              </button>
+            </div>
+          </section>
+        </div>
+
+        <aside className="nx-emp-lv-create-rail">
+          <section className="nx-emp-lv-create-side">
+            <div className="nx-emp-lv-create-side-head">
+              <span>Quỹ phép cá nhân</span>
+              <strong>NIÊN ĐỘ {year}</strong>
+            </div>
+            <div
+              className="nx-emp-lv-create-ring"
+              style={{ ['--pct' as string]: `${100 - usagePct}` }}
+              aria-hidden
+            >
+              <div className="inner">
+                <strong>{fmtDays(available)}</strong>
+                <span>NGÀY CÒN</span>
+              </div>
+            </div>
+            <ul className="nx-emp-lv-create-stats">
+              <li>
+                <span>Tỷ lệ sử dụng</span>
+                <strong>{usagePct.toFixed(1)}%</strong>
+              </li>
+              <li>
+                <span>Định mức năm</span>
+                <strong>{fmtDays(annualQuota)} ngày</strong>
+              </li>
+              <li>
+                <span>Đã tích luỹ dùng</span>
+                <strong>{fmtDays(annualUsed)} ngày</strong>
+              </li>
+              <li>
+                <span>Khả dụng hiện tại</span>
+                <strong>{fmtDays(available)} ngày</strong>
+              </li>
+            </ul>
+            {days > 0 && leaveType === 'ANNUAL' && (
+              <div className="nx-emp-lv-create-proj">
+                Sau khi gửi đơn này: <strong>{fmtDays(afterSubmit)} ngày</strong>
+              </div>
+            )}
+          </section>
+
+          <section className="nx-emp-lv-create-side">
+            <div className="nx-emp-lv-create-side-head">
+              <span>Quy trình phê duyệt</span>
+              <span className="sla">SLA: &lt; 6 Giờ</span>
+            </div>
+            <ol className="nx-emp-lv-create-flow">
+              <li className="done">
+                <i />
+                <div>
+                  <strong>Nhân viên gửi đơn</strong>
+                  <span>{dash?.employeeName || user?.username || 'Bạn'}</span>
+                </div>
+              </li>
+              <li className={handoverId ? 'next' : ''}>
+                <i />
+                <div>
+                  <strong>Đồng nghiệp xác nhận bàn giao</strong>
+                  <span>
+                    {handoverEmp?.fullName || 'Chọn người nhận bàn giao'}
+                    <em>SLA &lt; 2h</em>
+                  </span>
+                </div>
+              </li>
+              <li>
+                <i />
+                <div>
+                  <strong>Quản lý trực tiếp phê duyệt</strong>
+                  <span>
+                    {managerName || 'Quản lý phòng ban'}
+                    <em>SLA &lt; 4h</em>
+                  </span>
+                </div>
+              </li>
+            </ol>
+            <p className="nx-emp-lv-create-notify">
+              Thông báo gửi qua email công ty và kênh Slack khi có cập nhật trạng thái.
+            </p>
+          </section>
+
+          <section className="nx-emp-lv-create-side muted">
+            <h3>Tóm tắt nhanh</h3>
+            <div className="nx-emp-lv-create-sum-row">
+              <span>Loại</span>
+              <strong>{typeOptionLabel}</strong>
+            </div>
+            <div className="nx-emp-lv-create-sum-row">
+              <span>Thời lượng</span>
+              <strong>{days > 0 ? `${fmtDays(days)} ngày` : '—'}</strong>
+            </div>
+          </section>
+        </aside>
+      </div>
+    </div>
+  );
 }
 
-function fmt(iso: string) {
-  if (!iso) return '—';
-  const [y, m, d] = iso.slice(0, 10).split('-');
-  return `${d}/${m}/${y}`;
-}
-
-export default function LeaveCreatePage() {
+function ManagerLeaveCreatePage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const canPickEmp = user?.role === 'ADMIN' || user?.role === 'MANAGER';
@@ -386,4 +828,12 @@ export default function LeaveCreatePage() {
       </div>
     </div>
   );
+}
+
+export default function LeaveCreatePage() {
+  const { user } = useAuth();
+  if (user?.role === 'EMPLOYEE') {
+    return <EmployeeLeaveCreatePage />;
+  }
+  return <ManagerLeaveCreatePage />;
 }

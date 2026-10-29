@@ -3,6 +3,16 @@ import { Alert, Spinner } from 'react-bootstrap';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
+import {
+  ST_EMP,
+  TYPE_LABEL,
+  fmtDate,
+  fmtDays,
+  initials,
+  parseStoredReason,
+  slaHint,
+  weekdayVi,
+} from './leaveEmployeeUtils';
 import '../styles/leave.css';
 
 type Detail = {
@@ -19,7 +29,9 @@ type Detail = {
   reviewComment: string | null;
   reviewerName: string | null;
   reviewedAt: string | null;
+  createdAt: string;
   employee: {
+    id: number;
     fullName: string;
     employeeCode: string;
     position?: string | null;
@@ -40,7 +52,7 @@ type Detail = {
 
 type Stats = { onLeaveToday: number; today: string };
 
-const TYPE: Record<string, string> = {
+const TYPE_MGR: Record<string, string> = {
   ANNUAL: 'Phép năm (AL)',
   SICK: 'Ốm đau BHXH',
   UNPAID: 'Không lương',
@@ -51,31 +63,295 @@ const ST: Record<string, string> = {
   PENDING: 'Chờ duyệt',
   APPROVED: 'Đã duyệt',
   REJECTED: 'Từ chối',
+  CANCELLED: 'Đã hủy',
 };
 
-function fmt(iso: string | null | undefined) {
+function fmtDateTime(iso: string | null | undefined) {
   if (!iso) return '—';
   const d = new Date(iso);
   if (!Number.isNaN(d.getTime()) && String(iso).includes('T')) {
     const p = (n: number) => String(n).padStart(2, '0');
     return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
   }
-  const [y, m, day] = String(iso).slice(0, 10).split('-');
-  return `${day}/${m}/${y}`;
-}
-
-function initials(n: string) {
-  const p = n.trim().split(/\s+/).filter(Boolean);
-  if (!p.length) return '?';
-  if (p.length === 1) return p[0].slice(0, 2).toUpperCase();
-  return (p[0][0] + p[p.length - 1][0]).toUpperCase();
+  return fmtDate(String(iso));
 }
 
 function auditLabel(action: string) {
   if (action === 'LEAVE_CREATE') return 'Tạo đơn nghỉ phép';
   if (action === 'LEAVE_APPROVED') return 'Phê duyệt đơn';
   if (action === 'LEAVE_REJECTED') return 'Từ chối đơn';
+  if (action === 'LEAVE_CANCELLED') return 'Hủy đơn nghỉ phép';
   return action;
+}
+
+function EmployeeLeaveDetailView({
+  detail,
+  managerName,
+  onCancel,
+  cancelBusy,
+  note,
+  setNote,
+}: {
+  detail: Detail;
+  managerName: string | null;
+  onCancel: () => void;
+  cancelBusy: boolean;
+  note: string;
+  setNote: (v: string) => void;
+}) {
+  const parsed = parseStoredReason(detail.reason);
+  const usedPct =
+    detail.quota.annualQuota > 0
+      ? Math.min(100, ((detail.quota.used + detail.quota.thisRequest) / detail.quota.annualQuota) * 100)
+      : 0;
+  const handoverStepClass = !detail.handover
+    ? ''
+    : detail.status !== 'PENDING'
+      ? 'done'
+      : 'next';
+
+  return (
+    <div className="nx-emp-lv-detail">
+      <nav className="nx-emp-lv-detail-crumb" aria-label="Breadcrumb">
+        <Link to="/leave">Quay lại danh sách đơn</Link>
+        <span>›</span>
+        <span>Quản trị cá nhân</span>
+        <span>›</span>
+        <span>Phân hệ Nghỉ phép</span>
+        <span>›</span>
+        <span className="current">Chi tiết đơn #{detail.leaveCode}</span>
+      </nav>
+
+      <header className="nx-emp-lv-detail-head">
+        <div>
+          <div className="nx-emp-lv-detail-meta-row">
+            <span className="code">#{detail.leaveCode}</span>
+            {detail.status === 'PENDING' && (
+              <span className="nx-emp-lv-detail-sla">{slaHint(detail.createdAt, detail.urgency)}</span>
+            )}
+          </div>
+          <h1>{TYPE_LABEL[detail.leaveType] || detail.leaveType}</h1>
+          <p className="nx-emp-lv-detail-sub">
+            {detail.employee?.fullName} · {detail.department?.name || '—'} · Gửi lúc{' '}
+            {fmtDateTime(detail.createdAt)}
+          </p>
+        </div>
+        <div className="nx-emp-lv-detail-head-right">
+          <span className={`nx-emp-lv-detail-st ${detail.status}`}>
+            {ST_EMP[detail.status] || detail.status}
+          </span>
+          <div className="nx-emp-lv-detail-pills">
+            <span>
+              <em>Thời lượng</em>
+              <strong>{fmtDays(detail.daysCount)} Ngày</strong>
+            </span>
+            <span>
+              <em>Hưởng lương</em>
+              <strong>{detail.leaveType === 'UNPAID' ? '0%' : '100%'}</strong>
+            </span>
+          </div>
+        </div>
+      </header>
+
+      <div className="nx-emp-lv-detail-layout">
+        <div className="nx-emp-lv-detail-main">
+          <section className="nx-emp-lv-detail-card">
+            <h2>Thông tin chi tiết đơn nghỉ phép</h2>
+            <div className="nx-emp-lv-detail-grid">
+              <div>
+                <span className="lbl">Loại &amp; thời gian</span>
+                <strong>{TYPE_LABEL[detail.leaveType] || detail.leaveType}</strong>
+                <span className="nx-lv-sub">
+                  {weekdayVi(detail.startDate)}, {fmtDate(detail.startDate)}
+                  {detail.startDate !== detail.endDate
+                    ? ` – ${fmtDate(detail.endDate)}`
+                    : ''}
+                </span>
+                <span className="nx-emp-lv-detail-format">{parsed.formatLabel}</span>
+              </div>
+              {detail.leaveType === 'ANNUAL' && (
+                <div className="nx-emp-lv-detail-balance">
+                  <span className="lbl">Ảnh hưởng quỹ phép</span>
+                  <div className="nx-emp-lv-detail-balance-row">
+                    <div>
+                      <span>Khả dụng</span>
+                      <strong>{fmtDays(detail.quota.remaining)}</strong>
+                    </div>
+                    <div>
+                      <span>Thay đổi</span>
+                      <strong className="neg">−{fmtDays(detail.quota.thisRequest)}</strong>
+                    </div>
+                    <div>
+                      <span>Sau duyệt (dự kiến)</span>
+                      <strong>{fmtDays(detail.quota.remainingAfter)}</strong>
+                    </div>
+                  </div>
+                  <div className="nx-emp-lv-detail-bar">
+                    <i style={{ width: `${usedPct}%` }} />
+                  </div>
+                  <span className="nx-lv-sub">
+                    Đã dùng {fmtDays(detail.quota.used + (detail.status === 'APPROVED' ? detail.quota.thisRequest : 0))}/
+                    {fmtDays(detail.quota.annualQuota)} ngày
+                  </span>
+                </div>
+              )}
+              <div className="full">
+                <span className="lbl">Lý do xin nghỉ</span>
+                <p className="nx-emp-lv-detail-reason">{parsed.mainReason || '—'}</p>
+              </div>
+            </div>
+          </section>
+
+          <section className="nx-emp-lv-detail-card">
+            <h2>Kế hoạch bàn giao công việc</h2>
+            {detail.handover ? (
+              <div className="nx-emp-lv-detail-handover-person">
+                <span className="nx-lv-avatar">{initials(detail.handover.fullName)}</span>
+                <div>
+                  <strong>{detail.handover.fullName}</strong>
+                  <span className="nx-lv-sub">{detail.handover.position || 'Đồng nghiệp'}</span>
+                  <span className="nx-emp-lv-detail-handover-st">
+                    {detail.status === 'PENDING' ? 'Chờ xác nhận bàn giao' : 'Đã xác nhận bàn giao'}
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <p className="nx-lv-muted">Không chỉ định người nhận bàn giao</p>
+            )}
+            {parsed.handoverPlan && (
+              <p className="nx-emp-lv-detail-reason">{parsed.handoverPlan}</p>
+            )}
+            {detail.attachmentName && (
+              <div className="nx-emp-lv-detail-file">
+                <span className="icon" aria-hidden />
+                <div>
+                  <strong>{detail.attachmentName}</strong>
+                  <span className="nx-lv-sub">Tệp tham chiếu (không upload nhị phân)</span>
+                </div>
+              </div>
+            )}
+          </section>
+
+          <section className="nx-emp-lv-detail-card">
+            <h2>Trao đổi &amp; Ghi chú thẩm định</h2>
+            <ul className="nx-emp-lv-detail-thread">
+              {detail.audit.length === 0 && (
+                <li className="muted">Chưa có trao đổi — hệ thống ghi nhận khi có cập nhật.</li>
+              )}
+              {detail.audit.map((a) => (
+                <li key={a.id}>
+                  <span className="nx-lv-avatar sm">{initials(a.actorUsername)}</span>
+                  <div>
+                    <strong>{auditLabel(a.action)}</strong>
+                    <span className="nx-lv-sub">
+                      {a.actorUsername} · {fmtDateTime(a.createdAt)}
+                    </span>
+                  </div>
+                </li>
+              ))}
+              {detail.reviewComment && (
+                <li>
+                  <span className="nx-lv-avatar sm">{initials(detail.reviewerName || 'QL')}</span>
+                  <div>
+                    <strong>Nhận xét quản lý</strong>
+                    <p className="nx-emp-lv-detail-reason">{detail.reviewComment}</p>
+                  </div>
+                </li>
+              )}
+            </ul>
+            {detail.status === 'PENDING' && (
+              <div className="nx-emp-lv-detail-compose">
+                <textarea
+                  rows={3}
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder="Gửi thêm ghi chú cho quản lý… (chỉ lưu cục bộ — chưa có API bình luận)"
+                  disabled
+                />
+                <button type="button" className="nx-btn-outline" disabled title="Chưa có API bình luận">
+                  Gửi phản hồi
+                </button>
+              </div>
+            )}
+          </section>
+        </div>
+
+        <aside className="nx-emp-lv-detail-rail">
+          <section className="nx-emp-lv-detail-side">
+            <h3>Tiến trình phê duyệt</h3>
+            <ol className="nx-emp-lv-create-flow nx-emp-lv-detail-flow">
+              <li className="done">
+                <i />
+                <div>
+                  <strong>Nhân viên tạo đơn</strong>
+                  <span>{detail.employee?.fullName}</span>
+                </div>
+              </li>
+              <li className={handoverStepClass}>
+                <i />
+                <div>
+                  <strong>Người nhận bàn giao</strong>
+                  <span>{detail.handover?.fullName || '—'}</span>
+                </div>
+              </li>
+              <li
+                className={
+                  detail.status === 'APPROVED'
+                    ? 'done'
+                    : detail.status === 'PENDING'
+                      ? 'next'
+                      : detail.status === 'REJECTED'
+                        ? 'reject'
+                        : ''
+                }
+              >
+                <i />
+                <div>
+                  <strong>Quản lý phê duyệt</strong>
+                  <span>
+                    {detail.reviewerName || managerName || 'Quản lý trực tiếp'}
+                    {detail.status === 'PENDING' && detail.urgency !== 'URGENT' && (
+                      <em> SLA &lt; 4h</em>
+                    )}
+                  </span>
+                </div>
+              </li>
+            </ol>
+          </section>
+
+          <section className="nx-emp-lv-detail-side">
+            <h3>Tác vụ của bạn</h3>
+            <div className="nx-emp-lv-detail-actions">
+              {detail.status === 'PENDING' && (
+                <Link to={`/leave/new`} className="nx-btn-outline block">
+                  Tạo đơn mới
+                </Link>
+              )}
+              <button type="button" className="nx-btn-outline block" disabled title="Sắp có">
+                In đơn xin nghỉ phép (PDF)
+              </button>
+              {detail.status === 'PENDING' && (
+                <>
+                  <button
+                    type="button"
+                    className="nx-emp-lv-detail-cancel"
+                    disabled={cancelBusy}
+                    onClick={onCancel}
+                  >
+                    Hủy đơn nghỉ phép này
+                  </button>
+                  <p className="nx-emp-lv-detail-cancel-note">
+                    {fmtDays(detail.quota.thisRequest)} ngày sẽ được hoàn lại quỹ phép khi hủy đơn đang chờ
+                    duyệt.
+                  </p>
+                </>
+              )}
+            </div>
+          </section>
+        </aside>
+      </div>
+    </div>
+  );
 }
 
 export default function LeaveDetailPage() {
@@ -86,9 +362,12 @@ export default function LeaveDetailPage() {
   const canReview = user?.role === 'ADMIN' || user?.role === 'MANAGER';
   const [detail, setDetail] = useState<Detail | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
+  const [managerName, setManagerName] = useState<string | null>(null);
   const [comment, setComment] = useState('');
+  const [employeeNote, setEmployeeNote] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [cancelBusy, setCancelBusy] = useState(false);
   const [error, setError] = useState('');
   const [ok, setOk] = useState('');
 
@@ -116,6 +395,14 @@ export default function LeaveDetailPage() {
     void load();
   }, [load]);
 
+  useEffect(() => {
+    if (user?.role !== 'EMPLOYEE' || !user.employeeId) return;
+    api
+      .get<{ managerName?: string | null }>(`/employees/${user.employeeId}`)
+      .then((r) => setManagerName(r.data.managerName ?? null))
+      .catch(() => undefined);
+  }, [user?.role, user?.employeeId]);
+
   async function review(decision: 'APPROVED' | 'REJECTED') {
     if (!detail) return;
     if (decision === 'REJECTED' && !comment.trim() && !window.confirm('Từ chối không kèm nhận xét?')) {
@@ -136,6 +423,21 @@ export default function LeaveDetailPage() {
     }
   }
 
+  async function cancelOwn() {
+    if (!detail) return;
+    if (!window.confirm('Hủy đơn nghỉ phép đang chờ duyệt?')) return;
+    setCancelBusy(true);
+    try {
+      await api.patch(`/leave/${detail.id}/cancel`);
+      setOk('Đã hủy đơn nghỉ phép');
+      await load();
+    } catch {
+      setError('Không hủy được đơn');
+    } finally {
+      setCancelBusy(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="py-5 text-center">
@@ -150,6 +452,28 @@ export default function LeaveDetailPage() {
         <Alert variant="danger">{error || 'Không tìm thấy'}</Alert>
         <Link to="/leave">← Quay lại danh sách</Link>
       </div>
+    );
+  }
+
+  const isOwnEmployee =
+    user?.role === 'EMPLOYEE' &&
+    user.employeeId != null &&
+    detail.employee?.id === user.employeeId;
+
+  if (isOwnEmployee) {
+    return (
+      <>
+        {error && <Alert variant="danger">{error}</Alert>}
+        {ok && <Alert variant="success">{ok}</Alert>}
+        <EmployeeLeaveDetailView
+          detail={detail}
+          managerName={managerName}
+          onCancel={() => void cancelOwn()}
+          cancelBusy={cancelBusy}
+          note={employeeNote}
+          setNote={setEmployeeNote}
+        />
+      </>
     );
   }
 
@@ -234,13 +558,14 @@ export default function LeaveDetailPage() {
               <div>
                 <span>Loại phép</span>
                 <span className={`nx-lv-type ${detail.leaveType}`}>
-                  {TYPE[detail.leaveType] || detail.leaveType}
+                  {TYPE_MGR[detail.leaveType] || detail.leaveType}
                 </span>
               </div>
               <div>
                 <span>Thời gian nghỉ</span>
                 <strong>
-                  {fmt(detail.startDate)} → {fmt(detail.endDate)} ({detail.daysCount} ngày làm việc)
+                  {fmtDateTime(detail.startDate)} → {fmtDateTime(detail.endDate)} ({detail.daysCount}{' '}
+                  ngày làm việc)
                 </strong>
               </div>
               <div>
@@ -273,7 +598,7 @@ export default function LeaveDetailPage() {
                   <div>
                     <strong>{auditLabel(a.action)}</strong>
                     <div className="nx-lv-sub">
-                      {a.actorUsername} · {fmt(a.createdAt)}
+                      {a.actorUsername} · {fmtDateTime(a.createdAt)}
                     </div>
                   </div>
                 </li>
@@ -281,7 +606,7 @@ export default function LeaveDetailPage() {
             </ul>
             {detail.reviewerName && (
               <div className="nx-ld-reviewed">
-                Quyết định bởi <strong>{detail.reviewerName}</strong> · {fmt(detail.reviewedAt)}
+                Quyết định bởi <strong>{detail.reviewerName}</strong> · {fmtDateTime(detail.reviewedAt)}
                 {detail.reviewComment && (
                   <blockquote className="nx-ld-review-quote">{detail.reviewComment}</blockquote>
                 )}

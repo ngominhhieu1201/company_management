@@ -454,13 +454,26 @@ export class EmployeesService {
 
   /** Dùng cho dropdown (tasks…) — toàn bộ trong scope, không paginate */
   async findOptions(user: AuthUser) {
-    const list = await this.scoped(user);
+    // Employees need dept colleagues for leave handover / task collaborators
+    // (full list/detail stays self-scoped via scoped()).
+    let list: Employee[];
+    if (user.role === UserRole.EMPLOYEE && user.employeeId) {
+      const me = await this.repo.findOne({ where: { id: user.employeeId } });
+      const all = await this.repo.find({ order: { id: 'ASC' } });
+      list =
+        me?.departmentId != null
+          ? all.filter((e) => e.departmentId === me.departmentId)
+          : all.filter((e) => e.id === user.employeeId);
+    } else {
+      list = await this.scoped(user);
+    }
     return list.map((e) => ({
       id: e.id,
       employeeCode: e.employeeCode,
       fullName: e.fullName,
       email: e.email,
       departmentId: e.departmentId,
+      position: e.position,
       status: e.status,
     }));
   }

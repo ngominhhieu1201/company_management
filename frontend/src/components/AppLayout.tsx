@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import NexoraLogo from './NexoraLogo';
 
@@ -86,6 +86,17 @@ const links: {
     ),
   },
   {
+    to: '/attendance?view=history',
+    label: 'Lịch sử công',
+    roles: ['EMPLOYEE'],
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <rect x="4" y="5" width="16" height="15" rx="2" />
+        <path d="M8 3v4M16 3v4M4 10h16M8 14h8M8 18h5" />
+      </svg>
+    ),
+  },
+  {
     to: '/leave',
     label: 'Quản lý nghỉ phép',
     icon: (
@@ -121,14 +132,60 @@ function initials(name: string) {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
+const employeeNavOrder = [
+  '/dashboard',
+  '/attendance',
+  '/tasks',
+  '/leave',
+  '/account',
+  '/attendance?view=history',
+];
+
+function navLabel(link: (typeof links)[number], role?: string) {
+  if (role !== 'EMPLOYEE') return link.label;
+  if (link.to === '/attendance?view=history') return 'Lịch sử công';
+  const map: Record<string, string> = {
+    '/dashboard': 'Tổng quan',
+    '/attendance': 'Chấm công',
+    '/tasks': 'Công việc của tôi',
+    '/leave': 'Đơn nghỉ phép',
+    '/account': 'Hồ sơ cá nhân',
+  };
+  return map[link.to] ?? link.label;
+}
+
 export default function AppLayout() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const displayName = user?.username ?? 'User';
+  const isEmployee = user?.role === 'EMPLOYEE';
 
-  const visible = links.filter(
+  const filtered = links.filter(
     (l) => !l.roles || (user && l.roles.includes(user.role)),
   );
+
+  const visible = isEmployee
+    ? employeeNavOrder
+        .map((to) => filtered.find((l) => l.to === to))
+        .filter((l): l is (typeof links)[number] => Boolean(l))
+    : filtered;
+
+  function linkActive(to: string) {
+    const path = location.pathname;
+    const search = location.search;
+    if (to === '/attendance?view=history') {
+      return path === '/attendance' && search.includes('view=history');
+    }
+    if (to === '/attendance') {
+      return (
+        (path === '/attendance' && !search.includes('view=history')) ||
+        path.startsWith('/attendance/')
+      );
+    }
+    if (to === '/dashboard') return path === '/dashboard' || path === '/';
+    return path === to || path.startsWith(`${to}/`);
+  }
 
   return (
     <div className="nx-shell">
@@ -137,18 +194,21 @@ export default function AppLayout() {
           <NexoraLogo size={34} />
           <span className="nx-brand-text">NEXORA</span>
         </NavLink>
-        <div className="nx-nav-section">QUẢN LÝ</div>
+        <div className="nx-nav-section">
+          {isEmployee ? 'NHÂN VIÊN' : 'QUẢN LÝ'}
+        </div>
         <nav className="nx-nav">
           {visible.map((l) => (
             <NavLink
               key={l.to}
               to={l.to}
-              className={({ isActive }) =>
-                `nx-nav-link ${isActive ? 'active' : ''}`
+              end={l.to === '/attendance'}
+              className={() =>
+                `nx-nav-link ${linkActive(l.to) ? 'active' : ''}`
               }
             >
               {l.icon}
-              {l.label}
+              {navLabel(l, user?.role)}
             </NavLink>
           ))}
         </nav>

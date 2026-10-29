@@ -3,6 +3,7 @@ import { Alert, Spinner } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
+import EmployeeLeavePage from './EmployeeLeavePage';
 import '../styles/leave.css';
 
 type Row = {
@@ -103,6 +104,14 @@ function exportCsv(rows: Row[]) {
 }
 
 export default function LeavePage() {
+  const { user } = useAuth();
+  if (user?.role === 'EMPLOYEE') {
+    return <EmployeeLeavePage />;
+  }
+  return <ManagerLeavePage />;
+}
+
+function ManagerLeavePage() {
   const { user } = useAuth();
   const canReview = user?.role === 'ADMIN' || user?.role === 'MANAGER';
   const [items, setItems] = useState<Row[]>([]);

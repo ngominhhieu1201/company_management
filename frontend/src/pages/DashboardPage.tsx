@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Alert, Spinner } from 'react-bootstrap';
 import api from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
+import '../styles/employee-home.css';
 
 type AttendanceBlock = {
   checkedIn: number;
@@ -59,6 +60,63 @@ type AdminStats = {
   tasksByStatus?: Record<string, number>;
 };
 
+type EmployeePriorityTask = {
+  id: number;
+  taskCode?: string;
+  title: string;
+  priority: string;
+  status: string;
+  progress: number;
+  dueDate: string | null;
+  startDate?: string | null;
+};
+
+type EmployeeLeaveItem = {
+  id: number;
+  leaveCode?: string;
+  leaveTypeLabel: string;
+  startDate: string;
+  endDate: string;
+  daysCount?: number;
+  reason?: string | null;
+  status: string;
+};
+
+type EmployeeAttendanceToday = {
+  id?: number;
+  status: string;
+  checkedIn?: boolean;
+  checkInTime?: string | null;
+  checkOutTime?: string | null;
+  workedMinutes?: number;
+  shiftLabel?: string | null;
+  shiftStart?: string | null;
+  shiftEnd?: string | null;
+};
+
+type EmployeeStats = {
+  role: 'EMPLOYEE';
+  employeeName: string;
+  employeeCode?: string;
+  position?: string | null;
+  departmentName?: string | null;
+  departmentCode?: string | null;
+  openTasks: number;
+  highPriorityTasks: number;
+  dueSoon: number;
+  tasksByStatus?: Record<string, number>;
+  priorityTasks: EmployeePriorityTask[];
+  monthPresent: number;
+  monthWorkdays: number;
+  attendanceRate: number;
+  leavePending: number;
+  leaveRemaining: number;
+  annualQuota?: number;
+  annualUsed?: number;
+  leavePendingItems: EmployeeLeaveItem[];
+  attendanceToday: EmployeeAttendanceToday;
+};
+
 type ManagerStats = {
   role: 'MANAGER';
   managerName: string;
@@ -108,6 +166,33 @@ function firstName(username: string) {
   const parts = username.trim().split(/[\s._@-]+/).filter(Boolean);
   const raw = parts[parts.length - 1] || username;
   return raw.charAt(0).toUpperCase() + raw.slice(1);
+}
+
+function employeeFirstName(fullName: string) {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+  const raw = parts[parts.length - 1] || fullName;
+  return raw.charAt(0).toUpperCase() + raw.slice(1);
+}
+
+function timeOnly(iso: string | null | undefined) {
+  if (!iso) return '—';
+  if (/^\d{1,2}:\d{2}/.test(iso)) return iso.slice(0, 5);
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function formatWorkedMinutes(mins?: number | null) {
+  if (mins == null || mins < 0) return '—';
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return `${h}h ${m}m`;
+}
+
+function formatRate(rate: number) {
+  if (!Number.isFinite(rate)) return '—';
+  return `${Math.round(rate)}%`;
 }
 
 function initials(name: string) {
@@ -275,6 +360,16 @@ export default function DashboardPage() {
         busyId={busyId}
         now={now}
         onReviewLeave={reviewLeave}
+      />
+    );
+  }
+
+  if (stats.role === 'EMPLOYEE') {
+    return (
+      <EmployeeDashboard
+        stats={stats as unknown as EmployeeStats}
+        error={error}
+        now={now}
       />
     );
   }
@@ -496,6 +591,300 @@ export default function DashboardPage() {
           </div>
         )}
       </section>
+    </div>
+  );
+}
+
+function EmployeeDashboard({
+  stats,
+  error,
+  now,
+}: {
+  stats: EmployeeStats;
+  error: string;
+  now: Date;
+}) {
+  const att = stats.attendanceToday ?? { status: 'ABSENT' };
+  const shiftStatus = att.status;
+  const checkedIn =
+    att.checkedIn === true ||
+    shiftStatus === 'IN_PROGRESS' ||
+    shiftStatus === 'COMPLETED';
+  const canCheckOut = shiftStatus === 'IN_PROGRESS';
+  const pendingLeaves = stats.leavePendingItems.filter(
+    (row) => row.status === 'PENDING',
+  );
+
+  let shiftBadge = { cls: '', label: 'Chưa chấm công' };
+  if (shiftStatus === 'IN_PROGRESS') {
+    shiftBadge = { cls: 'on', label: 'Đang trong ca' };
+  } else if (shiftStatus === 'COMPLETED') {
+    shiftBadge = { cls: 'done', label: 'Hoàn tất ca' };
+  } else if (checkedIn) {
+    shiftBadge = { cls: 'on', label: 'Đã check-in' };
+  }
+
+  const checkCta = canCheckOut
+    ? { to: '/attendance', label: 'Check-out' }
+    : { to: '/attendance', label: 'Check-in' };
+
+  return (
+    <div className="nx-emp">
+      {error && <Alert variant="danger">{error}</Alert>}
+
+      <div className="nx-emp-head">
+        <div>
+          <div className="nx-dash-kicker">{formatViDate(now)}</div>
+          <h1>
+            {greetingForHour(now.getHours())},{' '}
+            {employeeFirstName(stats.employeeName)}!
+          </h1>
+          <p className="nx-emp-sub">
+            {stats.position && <strong>{stats.position}</strong>}
+            {stats.position && stats.departmentName && ' · '}
+            {stats.departmentName}
+            {stats.employeeCode && (
+              <>
+                {' '}
+                · <span>Mã NV {stats.employeeCode}</span>
+              </>
+            )}
+          </p>
+        </div>
+        <div className="nx-emp-actions">
+          <Link to="/attendance" className="nx-btn-primary">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="8" />
+              <path d="M12 8v4.5l3 1.5" />
+            </svg>
+            {canCheckOut ? 'Check-out' : 'Check-in'}
+          </Link>
+          <Link to="/tasks" className="nx-btn-outline">
+            Công việc của tôi
+          </Link>
+        </div>
+      </div>
+
+      <div className="nx-kpi-grid">
+        <div className="nx-kpi">
+          <div className="nx-kpi-icon green">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <circle cx="12" cy="12" r="8" />
+              <path d="M12 8v4.5l3 1.5" />
+            </svg>
+          </div>
+          <div>
+            <div className="nx-kpi-label">Chấm công tháng</div>
+            <div className="nx-kpi-value">
+              {stats.monthPresent}
+              <span className="nx-emp-kpi-sub"> / {stats.monthWorkdays}</span>
+            </div>
+            <div className="nx-kpi-hint up">
+              Tỷ lệ {formatRate(stats.attendanceRate)}
+            </div>
+          </div>
+        </div>
+        <div className="nx-kpi">
+          <div className="nx-kpi-icon orange">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <rect x="4" y="4" width="16" height="16" rx="3" />
+              <path d="m8 12 2.5 2.5L16 9" />
+            </svg>
+          </div>
+          <div>
+            <div className="nx-kpi-label">Công việc</div>
+            <div className="nx-kpi-value">{stats.openTasks}</div>
+            <div className="nx-kpi-hint">
+              {stats.highPriorityTasks} ưu tiên cao
+              {stats.dueSoon > 0 ? ` · ${stats.dueSoon} sắp hạn` : ''}
+            </div>
+          </div>
+        </div>
+        <div className="nx-kpi">
+          <div className="nx-kpi-icon purple">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <rect x="4" y="5" width="16" height="15" rx="2" />
+              <path d="M8 3v4M16 3v4M4 10h16" />
+            </svg>
+          </div>
+          <div>
+            <div className="nx-kpi-label">Phép còn</div>
+            <div className="nx-kpi-value">{stats.leaveRemaining}</div>
+            <div className="nx-kpi-hint">
+              {stats.leavePending > 0
+                ? `${stats.leavePending} đơn chờ duyệt`
+                : 'ngày phép khả dụng'}
+            </div>
+          </div>
+        </div>
+        <div className="nx-kpi">
+          <div className="nx-kpi-icon blue">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <path d="M12 6v6l4 2" />
+              <circle cx="12" cy="12" r="8" />
+            </svg>
+          </div>
+          <div>
+            <div className="nx-kpi-label">Thời gian trong ca</div>
+            <div className="nx-kpi-value" style={{ fontSize: '1.35rem' }}>
+              {formatWorkedMinutes(att.workedMinutes)}
+            </div>
+            <div className="nx-kpi-hint">hôm nay</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="nx-emp-body">
+        <div className="nx-emp-main">
+          <section className="nx-emp-shift">
+            <div className="nx-emp-shift-top">
+              <div>
+                <h2>Ca làm việc hôm nay</h2>
+                <div className="nx-emp-shift-label">
+                  {att.shiftLabel || 'Ca hành chính'}
+                </div>
+              </div>
+              <span className={`nx-emp-shift-badge ${shiftBadge.cls}`}>
+                {shiftBadge.label}
+              </span>
+            </div>
+            <div className="nx-emp-shift-times">
+              <div>
+                <span>Bắt đầu ca</span>
+                <strong>{timeOnly(att.shiftStart)}</strong>
+              </div>
+              <div>
+                <span>Kết thúc ca</span>
+                <strong>{timeOnly(att.shiftEnd)}</strong>
+              </div>
+              <div>
+                <span>Giờ vào</span>
+                <strong>{timeOnly(att.checkInTime)}</strong>
+              </div>
+            </div>
+            <div className="nx-emp-shift-foot">
+              <small>
+                {checkedIn ? (
+                  <>
+                    Đã check-in lúc <strong>{timeOnly(att.checkInTime)}</strong>
+                    {att.checkOutTime && (
+                      <>
+                        {' '}
+                        · Ra <strong>{timeOnly(att.checkOutTime)}</strong>
+                      </>
+                    )}
+                  </>
+                ) : (
+                  'Bạn chưa check-in ca hôm nay.'
+                )}
+              </small>
+              <Link to={checkCta.to} className="nx-emp-btn-light">
+                {checkCta.label}
+              </Link>
+            </div>
+          </section>
+
+          <section className="nx-panel">
+            <div className="nx-emp-tasks-head">
+              <h2 className="nx-panel-title" style={{ margin: 0 }}>
+                Công việc ưu tiên
+              </h2>
+              <Link to="/tasks">Xem tất cả →</Link>
+            </div>
+            {stats.priorityTasks.length === 0 ? (
+              <div className="nx-empty">Không có công việc ưu tiên.</div>
+            ) : (
+              <div className="nx-emp-task-list">
+                {stats.priorityTasks.map((t) => (
+                  <Link
+                    key={t.id}
+                    to={`/tasks/${t.id}`}
+                    className="nx-emp-task-row"
+                  >
+                    <div className="nx-emp-task-top">
+                      <div>
+                        {t.taskCode && (
+                          <div className="nx-emp-task-code">{t.taskCode}</div>
+                        )}
+                        <strong>{t.title}</strong>
+                      </div>
+                      <span className={`nx-prio ${priorityClass(t.priority)}`}>
+                        {priorityLabel(t.priority)}
+                      </span>
+                    </div>
+                    <div className="nx-progress">
+                      <div className="nx-progress-bar">
+                        <span style={{ width: `${t.progress}%` }} />
+                      </div>
+                      <em>{statusLabel(t.status, t.progress)}</em>
+                    </div>
+                    {t.dueDate && (
+                      <span
+                        style={{
+                          display: 'block',
+                          marginTop: '0.45rem',
+                          fontSize: '0.82rem',
+                          color: 'var(--nx-muted)',
+                        }}
+                      >
+                        Hạn: {formatDue(t.dueDate)}
+                      </span>
+                    )}
+                  </Link>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
+
+        <aside className="nx-emp-side">
+          <section className="nx-panel">
+            <div className="nx-emp-leave-head">
+              <h2 className="nx-panel-title">Đơn nghỉ phép</h2>
+              <Link to="/leave?create=1" className="nx-emp-leave-new">
+                + Tạo đơn
+              </Link>
+            </div>
+            <div className="nx-emp-leave-list">
+              {pendingLeaves.length === 0 && (
+                <div className="nx-empty">Không có đơn đang chờ duyệt.</div>
+              )}
+              {pendingLeaves.map((row) => (
+                <Link
+                  key={row.id}
+                  to={`/leave/${row.id}`}
+                  className="nx-emp-leave-item"
+                >
+                  <div className="nx-emp-leave-item-top">
+                    <strong>{row.leaveTypeLabel}</strong>
+                    <span className="nx-emp-leave-pending">Chờ duyệt</span>
+                  </div>
+                  <span>
+                    {formatDateRange(row.startDate, row.endDate)}
+                    {row.daysCount != null ? ` · ${row.daysCount} ngày` : ''}
+                  </span>
+                  {row.reason && (
+                    <span style={{ marginTop: '0.25rem' }}>
+                      {row.reason.length > 72
+                        ? `${row.reason.slice(0, 72)}…`
+                        : row.reason}
+                    </span>
+                  )}
+                </Link>
+              ))}
+            </div>
+            {(stats.annualQuota != null || stats.annualUsed != null) && (
+              <div className="nx-emp-leave-quota">
+                Phép năm:{' '}
+                <strong>
+                  {stats.annualUsed ?? 0}/{stats.annualQuota ?? '—'}
+                </strong>{' '}
+                đã dùng · còn <strong>{stats.leaveRemaining}</strong> ngày
+              </div>
+            )}
+          </section>
+        </aside>
+      </div>
     </div>
   );
 }

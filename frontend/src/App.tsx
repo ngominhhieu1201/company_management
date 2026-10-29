@@ -53,7 +53,6 @@ export default function App() {
               <Route element={<RoleRoute roles={['ADMIN', 'MANAGER']} />}>
                 <Route path="/employees/new" element={<EmployeeCreatePage />} />
                 <Route path="/departments/new" element={<DepartmentCreatePage />} />
-                <Route path="/tasks/new" element={<TaskCreatePage />} />
               </Route>
 
               <Route path="/employees/:id/edit" element={<EmployeeEditPage />} />
@@ -61,6 +60,7 @@ export default function App() {
               <Route path="/employees" element={<EmployeesPage />} />
               <Route path="/departments/:id" element={<DepartmentDetailPage />} />
               <Route path="/departments" element={<DepartmentsPage />} />
+              <Route path="/tasks/new" element={<TaskCreatePage />} />
               <Route path="/tasks/:id/edit" element={<TaskEditPage />} />
               <Route path="/tasks/:id" element={<TaskDetailPage />} />
               <Route path="/tasks" element={<TasksPage />} />

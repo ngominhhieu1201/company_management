@@ -104,23 +104,28 @@
 
 ## Kiểm thử đã chạy (self-test)
 
-### API (`node scripts/api-selftest.mjs`)
+### API
 
-Kết quả gần nhất: **PASS=42 · FAIL=0 · SKIP=1** (GPS work-locations — backlog FRS).
+```bash
+node scripts/api-selftest.mjs          # Admin/Employee SRS acceptance
+node scripts/manager_api_selftest.mjs  # Manager + Admin compat
+```
 
-Bao gồm: login 3 role, sai mật khẩu, chặn employee `/users` & logs & duyệt phép, CRUD users/employees/departments/tasks, leave PENDING→APPROVED, check-in/out ảnh, chống trùng chấm công, dashboard, logout.
+Kết quả gần nhất: **api-selftest PASS=40 FAIL=0 SKIP=2** · **manager_api PASS=48 FAIL=0**.
 
-### Selenium UI (`python scripts/ui_selenium_test.py`)
-
-Kết quả gần nhất: **PASS=26 · FAIL=0** — mở Chrome thật, đăng nhập admin, duyệt 19 màn (+ logs), click chi tiết, gửi đơn nghỉ, sidebar, bad login, manager bị hạn chế `/users`.
+### Selenium UI (full luồng Admin → Manager → Employee)
 
 ```bash
 # Terminal 1–2: backend + frontend đang chạy
-node scripts/api-selftest.mjs
+python scripts/full_ui_selenium_test.py
+# (tuỳ chọn) suite cũ theo role:
 python scripts/ui_selenium_test.py
+python scripts/manager_ui_selenium_test.py
 ```
 
-Kết quả ghi tại `scripts/api-selftest-results.txt`, `scripts/ui-selenium-results.txt`.
+Kết quả gần nhất (`full_ui_selenium_test.py`): **PASS=56 · FAIL=0** — bad login, toàn bộ màn Admin/Manager/Employee (EMP-01…06), tạo task/leave, chi tiết, RBAC chặn `/users` `/logs`, logout từng role.
+
+Kết quả ghi tại `scripts/api-selftest-results.txt`, `scripts/manager-api-selftest-results.txt`, `scripts/full-ui-selenium-results.txt`.
 
 ---
 

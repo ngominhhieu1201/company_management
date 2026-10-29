@@ -36,7 +36,7 @@ export class TasksController {
   }
 
   @Get('next-code')
-  @Roles(UserRole.ADMIN, UserRole.MANAGER)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)
   nextCode() {
     return this.service.nextCode();
   }
@@ -75,7 +75,7 @@ export class TasksController {
   }
 
   @Post()
-  @Roles(UserRole.ADMIN, UserRole.MANAGER)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)
   create(@Body() dto: CreateTaskDto, @CurrentUser() user: any) {
     return this.service.create(dto, user);
   }

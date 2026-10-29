@@ -12,6 +12,7 @@ import { Request, Response } from 'express';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { AuthService } from './auth.service';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { LoginDto } from './dto/login.dto';
 
 @ApiTags('auth')
@@ -96,5 +97,27 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   me(@CurrentUser() user: Record<string, unknown>) {
     return { user };
+  }
+
+  @Get('profile')
+  @UseGuards(JwtAuthGuard)
+  profile(
+    @CurrentUser()
+    user: { id: number; role: string; employeeId: number | null },
+  ) {
+    return this.authService.getProfile(user);
+  }
+
+  @Post('change-password')
+  @UseGuards(JwtAuthGuard)
+  changePassword(
+    @CurrentUser() user: { id: number },
+    @Body() dto: ChangePasswordDto,
+  ) {
+    return this.authService.changePassword(
+      user.id,
+      dto.currentPassword,
+      dto.newPassword,
+    );
   }
 }

@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Spinner } from 'react-bootstrap';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
 import '../styles/tasks.css';
@@ -30,11 +30,7 @@ type Detail = {
   progress: number;
   startDate: string | null;
   dueDate: string | null;
-  estimatedHours: number | null;
-  actualHours: number | null;
   assignee: Emp | null;
-  reviewer: Emp | null;
-  collaborators: Emp[];
   reporter: Emp | null;
   reporterUsername: string | null;
   department: { id: number; name: string; departmentCode: string } | null;
@@ -59,19 +55,49 @@ type Audit = {
   actorUsername: string;
 };
 
-const FLOW = ['TODO', 'IN_PROGRESS', 'REVIEW', 'DONE'] as const;
+type TimelineItem =
+  | {
+      kind: 'comment';
+      id: string;
+      at: string;
+      who: string;
+      body: string;
+    }
+  | {
+      kind: 'audit';
+      id: string;
+      at: string;
+      who: string;
+      action: string;
+    };
+
 const ST: Record<string, string> = {
   TODO: 'TODO',
   IN_PROGRESS: 'ĐANG THỰC HIỆN',
   REVIEW: 'REVIEW',
   DONE: 'DONE',
 };
+
 const PRI: Record<string, string> = {
   URGENT: 'KHẨN CẤP',
   HIGH: 'CAO',
   MEDIUM: 'TRUNG BÌNH',
   LOW: 'THẤP',
 };
+
+function statusCls(status: string) {
+  if (status === 'IN_PROGRESS') return 'progress';
+  if (status === 'REVIEW') return 'review';
+  if (status === 'DONE') return 'done';
+  return 'todo';
+}
+
+function priorityCls(priority: string) {
+  if (priority === 'URGENT') return 'urgent';
+  if (priority === 'HIGH') return 'high';
+  if (priority === 'LOW') return 'low';
+  return 'medium';
+}
 
 function fmt(iso: string | null | undefined) {
   if (!iso) return '—';
@@ -84,6 +110,13 @@ function fmt(iso: string | null | undefined) {
   return `${day}/${m}/${y}`;
 }
 
+function fmtDate(iso: string | null | undefined) {
+  if (!iso) return '—';
+  const [y, m, day] = String(iso).slice(0, 10).split('-');
+  if (!y) return '—';
+  return `${day}/${m}/${y}`;
+}
+
 function daysLeft(due: string | null) {
   if (!due) return null;
   const a = new Date(due + 'T00:00:00');
@@ -92,19 +125,38 @@ function daysLeft(due: string | null) {
   return Math.ceil((a.getTime() - b.getTime()) / 86400000);
 }
 
+function slaLabel(sla: string) {
+  const map: Record<string, string> = {
+    ok: 'Trong hạn',
+    week: 'Trong tuần',
+    soon: 'Sắp đến hạn',
+    today: 'Hết hạn hôm nay',
+    overdue: 'Quá hạn',
+  };
+  return map[sla] || sla;
+}
+
 function actionLabel(a: string) {
   const map: Record<string, string> = {
     TASK_CREATE: 'Tạo công việc',
-    TASK_UPDATE: 'Cập nhật',
+    TASK_UPDATE: 'Cập nhật công việc',
     TASK_STATUS_CHANGE: 'Đổi trạng thái',
-    TASK_COMMENT: 'Bình luận',
+    TASK_COMMENT: 'Bình luận hệ thống',
   };
   return map[a] || a;
 }
 
+function initials(name: string) {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p[0]?.toUpperCase() ?? '')
+    .join('');
+}
+
 export default function TaskDetailPage() {
   const { id } = useParams();
-  const navigate = useNavigate();
   const { user } = useAuth();
   const canManage = user?.role === 'ADMIN' || user?.role === 'MANAGER';
 
@@ -116,9 +168,6 @@ export default function TaskDetailPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [ok, setOk] = useState('');
-  const [editTitle, setEditTitle] = useState('');
-  const [editDesc, setEditDesc] = useState('');
-  const [editHours, setEditHours] = useState('');
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -127,14 +176,9 @@ export default function TaskDetailPage() {
       const [d, c, a] = await Promise.all([
         api.get<Detail>(`/tasks/${id}`),
         api.get<Comment[]>(`/tasks/${id}/comments`),
-        api.get<Audit[]>(`/tasks/${id}/audit`, { params: { limit: 30 } }),
+        api.get<Audit[]>(`/tasks/${id}/audit`, { params: { limit: 50 } }),
       ]);
       setDetail(d.data);
-      setEditTitle(d.data.title);
-      setEditDesc(d.data.description || '');
-      setEditHours(
-        d.data.actualHours != null ? String(d.data.actualHours) : '',
-      );
       setComments(c.data);
       setAudit(a.data);
       setError('');
@@ -150,12 +194,43 @@ export default function TaskDetailPage() {
     void load();
   }, [load]);
 
+  const isAssignee =
+    detail != null &&
+    user?.employeeId != null &&
+    detail.assignee?.id === user.employeeId;
+
+  const canToggleCriteria = canManage || isAssignee;
+  const canMarkDone = canManage || isAssignee;
+
+  const timeline = useMemo(() => {
+    const items: TimelineItem[] = [
+      ...comments.map((c) => ({
+        kind: 'comment' as const,
+        id: `c-${c.id}`,
+        at: c.createdAt,
+        who: `${c.authorName} (@${c.authorUsername})`,
+        body: c.body,
+      })),
+      ...audit.map((a) => ({
+        kind: 'audit' as const,
+        id: `a-${a.id}`,
+        at: a.createdAt,
+        who: a.actorUsername,
+        action: a.action,
+      })),
+    ];
+    items.sort(
+      (x, y) => new Date(y.at).getTime() - new Date(x.at).getTime(),
+    );
+    return items;
+  }, [comments, audit]);
+
   async function setStatus(status: string) {
     if (!detail) return;
     setSaving(true);
     try {
       await api.patch(`/tasks/${detail.id}`, { status });
-      setOk(`Đã chuyển sang ${status}`);
+      setOk('Đã cập nhật trạng thái');
       await load();
     } catch {
       setError('Đổi trạng thái thất bại');
@@ -165,7 +240,7 @@ export default function TaskDetailPage() {
   }
 
   async function toggleCriterion(c: Criterion) {
-    if (!detail || !canManage) return;
+    if (!detail || !canToggleCriteria) return;
     const next = detail.criteria.map((x) =>
       x.id === c.id ? { ...x, done: !x.done } : x,
     );
@@ -177,37 +252,22 @@ export default function TaskDetailPage() {
     }
   }
 
-  async function saveUpdates() {
-    if (!detail) return;
-    setSaving(true);
-    try {
-      await api.patch(`/tasks/${detail.id}`, {
-        title: editTitle.trim(),
-        description: editDesc.trim() || null,
-        actualHours: editHours !== '' ? Number(editHours) : null,
-      });
-      setOk('Đã lưu cập nhật');
-      await load();
-    } catch {
-      setError('Lưu thất bại');
-    } finally {
-      setSaving(false);
-    }
-  }
-
   async function postComment() {
     if (!detail || !comment.trim()) return;
+    setSaving(true);
     try {
       await api.post(`/tasks/${detail.id}/comments`, { body: comment.trim() });
       setComment('');
-      const { data } = await api.get<Comment[]>(`/tasks/${detail.id}/comments`);
-      setComments(data);
-      const a = await api.get<Audit[]>(`/tasks/${detail.id}/audit`, {
-        params: { limit: 30 },
-      });
+      const [c, a] = await Promise.all([
+        api.get<Comment[]>(`/tasks/${detail.id}/comments`),
+        api.get<Audit[]>(`/tasks/${detail.id}/audit`, { params: { limit: 50 } }),
+      ]);
+      setComments(c.data);
       setAudit(a.data);
     } catch {
       setError('Gửi bình luận thất bại');
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -218,69 +278,51 @@ export default function TaskDetailPage() {
       </div>
     );
   }
+
   if (!detail) {
     return (
       <div>
         <Alert variant="danger">{error || 'Không tìm thấy'}</Alert>
-        <Link to="/tasks">← Quay lại</Link>
+        <Link to="/tasks">← Quay lại danh sách</Link>
       </div>
     );
   }
 
   const left = daysLeft(detail.dueDate);
-  const flowIdx = FLOW.indexOf(detail.status as (typeof FLOW)[number]);
+  const critTotal = detail.criteriaTotal || detail.criteria.length;
+  const critDone = detail.criteriaDone;
+  const progPct = Math.min(100, Math.max(0, detail.progress));
+  const ringOffset = 100 - progPct;
 
   return (
-    <div className="nx-td">
-      <div className="nx-td-top">
-        <div className="nx-tk-crumb">
-          <Link to="/tasks">Bảng Kanban / Danh sách</Link>
+    <div className="nx-td nx-td-mgr">
+      <div className="nx-td-headbar">
+        <nav className="nx-tk-crumb">
+          <span>Quản trị</span>
           <span>›</span>
-          <span>Quản lý công việc</span>
+          <Link to="/tasks">Phân hệ Công việc</Link>
           <span>›</span>
-          <span>Chi tiết: {detail.taskCode}</span>
-        </div>
-        <div style={{ fontSize: '0.85rem', fontWeight: 800, color: '#1565c0' }}>
-          {detail.taskCode}
-        </div>
-        <div className="nx-td-badges">
-          <span className={`nx-tk-st ${detail.status === 'IN_PROGRESS' ? 'progress' : detail.status === 'REVIEW' ? 'review' : detail.status === 'DONE' ? 'done' : 'todo'}`}>
-            {ST[detail.status] || detail.status}
-          </span>
-          <span
-            className={`nx-tk-pri ${
-              detail.priority === 'URGENT'
-                ? 'urgent'
-                : detail.priority === 'HIGH'
-                  ? 'high'
-                  : detail.priority === 'LOW'
-                    ? 'low'
-                    : 'medium'
-            }`}
-          >
-            {PRI[detail.priority] || detail.priority}
-          </span>
-        </div>
-        <h1>{detail.title}</h1>
-        <div className="nx-td-actions">
-          {detail.status === 'IN_PROGRESS' && (
-            <button
-              type="button"
-              className="nx-btn-outline"
-              disabled={saving}
-              onClick={() => void setStatus('REVIEW')}
-            >
-              Wait Review
-            </button>
+          <span>Chi tiết</span>
+          <span>›</span>
+          <span>{detail.taskCode}</span>
+        </nav>
+        <div className="nx-td-head-actions">
+          <Link to="/tasks" className="nx-btn-outline">
+            Quay lại danh sách
+          </Link>
+          {canManage && (
+            <Link to={`/tasks/${detail.id}/edit`} className="nx-btn-outline">
+              Chỉnh sửa
+            </Link>
           )}
-          {detail.status !== 'DONE' && (
+          {detail.status !== 'DONE' && canMarkDone && (
             <button
               type="button"
               className="nx-btn-primary"
               disabled={saving}
               onClick={() => void setStatus('DONE')}
             >
-              Complete (DONE)
+              Mark DONE
             </button>
           )}
         </div>
@@ -297,90 +339,47 @@ export default function TaskDetailPage() {
         </Alert>
       )}
 
+      <div className="nx-td-identity">
+        <span className="nx-td-code">{detail.taskCode}</span>
+        <div className="nx-td-badges">
+          <span className={`nx-tk-st ${statusCls(detail.status)}`}>
+            {ST[detail.status] || detail.status}
+          </span>
+          <span className={`nx-tk-pri ${priorityCls(detail.priority)}`}>
+            {PRI[detail.priority] || detail.priority}
+          </span>
+        </div>
+        {detail.projectName && (
+          <div className="nx-tk-scope-tags">
+            <span>{detail.projectName}</span>
+          </div>
+        )}
+      </div>
+
+      <h1 className="nx-td-title">{detail.title}</h1>
+
       <div className="nx-td-layout">
-        <div>
+        <div className="nx-td-main">
           <section className="nx-td-card">
-            <div className="nx-td-prog">
-              <div className="big">{detail.progress}%</div>
-              <div className="bar">
-                <i style={{ width: `${Math.min(100, detail.progress)}%` }} />
-              </div>
-            </div>
-            <div className="nx-td-metrics">
-              <div className="nx-td-metric">
-                <span>Thời gian thực tế</span>
-                <strong>
-                  {detail.actualHours ?? 0}h / {detail.estimatedHours ?? '—'}h
-                </strong>
-              </div>
-              <div className="nx-td-metric">
-                <span>Countdown SLA</span>
-                <strong style={{ color: left != null && left < 0 ? '#c62828' : undefined }}>
-                  {left == null
-                    ? '—'
-                    : left < 0
-                      ? `Quá ${Math.abs(left)} ngày`
-                      : left === 0
-                        ? 'Hết hạn hôm nay'
-                        : `${left} ngày`}
-                </strong>
-              </div>
-              <div className="nx-td-metric">
-                <span>Tiêu chí nghiệm thu</span>
-                <strong>
-                  {detail.criteriaDone}/{detail.criteriaTotal || 0} đạt
-                </strong>
-              </div>
+            <h2>Mô tả công việc</h2>
+            <div className="nx-td-desc">
+              {detail.description?.trim() ? (
+                detail.description
+              ) : (
+                <span className="nx-td-muted">Chưa có mô tả</span>
+              )}
             </div>
           </section>
 
           <section className="nx-td-card">
-            <h2>Mô tả</h2>
-            {canManage ? (
-              <>
-                <div className="nx-tc-field">
-                  <label>Tiêu đề</label>
-                  <input
-                    value={editTitle}
-                    onChange={(e) => setEditTitle(e.target.value)}
-                  />
-                </div>
-                <div className="nx-tc-field">
-                  <label>Nội dung</label>
-                  <textarea
-                    value={editDesc}
-                    onChange={(e) => setEditDesc(e.target.value)}
-                  />
-                </div>
-                <div className="nx-tc-field">
-                  <label>Giờ thực tế</label>
-                  <input
-                    type="number"
-                    min={0}
-                    value={editHours}
-                    onChange={(e) => setEditHours(e.target.value)}
-                  />
-                </div>
-              </>
-            ) : (
-              <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>
-                {detail.description || '—'}
-              </p>
-            )}
-            {detail.projectName && (
-              <div className="nx-tc-hint" style={{ marginTop: 8 }}>
-                Dự án: {detail.projectName}
-              </div>
-            )}
-          </section>
-
-          <section className="nx-td-card">
-            <h2>
-              Danh sách hạng mục công việc ({detail.criteriaDone}/
-              {detail.criteriaTotal})
-            </h2>
+            <div className="nx-td-crit-head">
+              <h2>Tiêu chí nghiệm thu</h2>
+              <span className="nx-td-crit-count">
+                {critDone}/{critTotal}
+              </span>
+            </div>
             {detail.criteria.length === 0 ? (
-              <div className="nx-tc-hint">Chưa có tiêu chí</div>
+              <div className="nx-td-muted">Chưa có tiêu chí</div>
             ) : (
               <ul className="nx-td-check">
                 {detail.criteria.map((c) => (
@@ -388,15 +387,16 @@ export default function TaskDetailPage() {
                     <input
                       type="checkbox"
                       checked={c.done}
-                      disabled={!canManage}
+                      disabled={!canToggleCriteria}
                       onChange={() => void toggleCriterion(c)}
                     />
                     <div>
-                      <strong>{c.title}</strong>
-                      <div className="nx-tc-hint">
-                        {c.category || 'General'} ·{' '}
-                        {c.done ? 'Đã đạt' : 'Đang thực hiện'}
-                      </div>
+                      <strong className={c.done ? 'done' : undefined}>
+                        {c.title}
+                      </strong>
+                      {c.category && (
+                        <div className="nx-tc-hint">{c.category}</div>
+                      )}
                     </div>
                   </li>
                 ))}
@@ -405,172 +405,149 @@ export default function TaskDetailPage() {
           </section>
 
           <section className="nx-td-card">
-            <h2>Trao đổi nội bộ</h2>
-            <div className="nx-tc-field">
+            <h2>Tệp đính kèm</h2>
+            <div className="nx-td-empty">
+              <p>Chưa có tệp đính kèm</p>
+              <span>Tính năng tải lên sẽ được bổ sung sau.</span>
+            </div>
+          </section>
+
+          <section className="nx-td-card">
+            <h2>Lịch sử &amp; trao đổi</h2>
+            <div className="nx-td-compose">
               <textarea
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
-                placeholder="Viết bình luận…"
+                placeholder="Viết bình luận hoặc cập nhật tiến độ…"
                 rows={3}
               />
               <button
                 type="button"
-                className="nx-btn-outline"
-                style={{ marginTop: 8 }}
+                className="nx-btn-primary"
+                disabled={saving || !comment.trim()}
                 onClick={() => void postComment()}
               >
                 Gửi
               </button>
             </div>
-            <ul className="nx-td-comments">
-              {comments.map((c) => (
-                <li key={c.id}>
-                  <div className="who">
-                    {c.authorName} (@{c.authorUsername}) · {fmt(c.createdAt)}
+            <ul className="nx-td-timeline">
+              {timeline.map((item) => (
+                <li
+                  key={item.id}
+                  className={
+                    item.kind === 'comment' ? 'is-comment' : 'is-audit'
+                  }
+                >
+                  <div className="nx-td-tl-meta">
+                    <span className="tag">
+                      {item.kind === 'comment' ? 'Bình luận' : 'Hệ thống'}
+                    </span>
+                    <span>{fmt(item.at)}</span>
                   </div>
-                  <div>{c.body}</div>
+                  <div className="nx-td-tl-who">{item.who}</div>
+                  <div className="nx-td-tl-body">
+                    {item.kind === 'comment'
+                      ? item.body
+                      : actionLabel(item.action)}
+                  </div>
                 </li>
               ))}
-              {comments.length === 0 && (
-                <li style={{ color: '#7a8a85' }}>Chưa có trao đổi</li>
+              {timeline.length === 0 && (
+                <li className="nx-td-muted">Chưa có lịch sử hoặc trao đổi</li>
               )}
             </ul>
           </section>
         </div>
 
-        <aside>
+        <aside className="nx-td-aside">
           <section className="nx-td-card">
-            <h3>Luồng trạng thái</h3>
-            <ul className="nx-td-flow">
-              {FLOW.map((s, i) => (
-                <li key={s} className={i <= flowIdx ? 'on' : ''}>
-                  <i className="dot" />
-                  {s}
-                </li>
-              ))}
-            </ul>
-            <div className="nx-td-actions" style={{ marginTop: 12 }}>
-              {detail.status !== 'TODO' && detail.status !== 'DONE' && (
-                <button
-                  type="button"
-                  className="nx-btn-outline"
-                  onClick={() => void setStatus('TODO')}
-                >
-                  Hold → TODO
-                </button>
-              )}
-            </div>
-          </section>
-
-          <section className="nx-td-card">
-            <h3>Nhân sự thực thi</h3>
-            <div className="nx-td-meta">
-              <div>
-                <span>Assignee</span>
-                {detail.assignee?.fullName || '—'}
-              </div>
-              <div>
-                <span>Reporter</span>
-                {detail.reporter?.fullName ||
-                  detail.reporterUsername ||
-                  '—'}
-              </div>
-              <div>
-                <span>Reviewer</span>
-                {detail.reviewer?.fullName || '—'}
-              </div>
-              <div>
+            <h3>Nhân sự</h3>
+            <ul className="nx-td-person">
+              <li>
+                <span>Phụ trách chính</span>
+                <strong>
+                  {detail.assignee ? (
+                    <>
+                      <i className="av">{initials(detail.assignee.fullName)}</i>
+                      {detail.assignee.fullName}
+                      <em>{detail.assignee.employeeCode}</em>
+                    </>
+                  ) : (
+                    '—'
+                  )}
+                </strong>
+              </li>
+              <li>
+                <span>Quản lý</span>
+                <strong>
+                  {detail.reporter?.fullName ||
+                    detail.reporterUsername ||
+                    '—'}
+                </strong>
+              </li>
+              <li>
                 <span>Phòng ban</span>
-                {detail.department
-                  ? `${detail.department.name} (${detail.department.departmentCode})`
-                  : '—'}
-              </div>
-              {detail.collaborators?.length > 0 && (
-                <div>
-                  <span>Phối hợp</span>
-                  {detail.collaborators.map((c) => c.fullName).join(', ')}
-                </div>
-              )}
-            </div>
+                <strong>
+                  {detail.department
+                    ? `${detail.department.name} (${detail.department.departmentCode})`
+                    : '—'}
+                </strong>
+              </li>
+            </ul>
           </section>
 
-          <section className="nx-td-card">
-            <h3>Thời gian &amp; SLA</h3>
-            <div className="nx-td-meta">
+          <section className="nx-td-card nx-td-sla">
+            <h3>SLA &amp; tiến độ</h3>
+            <div
+              className={`nx-td-sla-days ${
+                detail.sla === 'overdue' || detail.sla === 'today'
+                  ? 'warn'
+                  : ''
+              }`}
+            >
+              {left == null
+                ? '—'
+                : left < 0
+                  ? `Quá ${Math.abs(left)} ngày`
+                  : left === 0
+                    ? 'Hết hạn hôm nay'
+                    : `Còn ${left} ngày`}
+            </div>
+            <div className="nx-td-sla-label">{slaLabel(detail.sla)}</div>
+            <div className="nx-tc-prog-ring nx-td-sla-ring">
+              <svg viewBox="0 0 36 36" aria-hidden>
+                <path
+                  className="nx-tc-prog-bg"
+                  d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                />
+                <path
+                  className="nx-tc-prog-fill"
+                  strokeDasharray={`${progPct} ${ringOffset}`}
+                  d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                />
+              </svg>
+              <div className="nx-tc-prog-val">{progPct}%</div>
+            </div>
+            <div className="nx-td-meta nx-td-sla-dates">
               <div>
                 <span>Bắt đầu</span>
-                {fmt(detail.startDate)}
+                {fmtDate(detail.startDate)}
               </div>
               <div>
-                <span>Deadline</span>
+                <span>Hạn hoàn thành</span>
                 <strong
-                  style={{
-                    color:
-                      detail.sla === 'overdue' || detail.sla === 'today'
-                        ? '#c62828'
-                        : undefined,
-                  }}
+                  className={
+                    detail.sla === 'overdue' || detail.sla === 'today'
+                      ? 'warn'
+                      : undefined
+                  }
                 >
-                  {fmt(detail.dueDate)}
+                  {fmtDate(detail.dueDate)}
                 </strong>
-              </div>
-              <div>
-                <span>Ưu tiên</span>
-                {PRI[detail.priority]}
-              </div>
-              <div>
-                <span>Ước tính / thực tế</span>
-                {detail.estimatedHours ?? '—'}h / {detail.actualHours ?? 0}h
               </div>
             </div>
           </section>
-
-          <section className="nx-td-card">
-            <h3>Lịch sử thao tác</h3>
-            <ul className="nx-td-audit">
-              {audit.map((a) => (
-                <li key={a.id}>
-                  <strong>{actionLabel(a.action)}</strong>
-                  <div className="meta">
-                    {a.actorUsername} · {fmt(a.createdAt)}
-                  </div>
-                </li>
-              ))}
-              {audit.length === 0 && (
-                <li style={{ color: '#7a8a85' }}>Chưa có nhật ký</li>
-              )}
-            </ul>
-          </section>
         </aside>
-      </div>
-
-      <div className="nx-td-foot">
-        <button type="button" className="ghost" onClick={() => navigate('/tasks')}>
-          Quay lại
-        </button>
-        <div className="spacer" />
-        {canManage && (
-          <>
-            <button
-              type="button"
-              className="nx-btn-outline"
-              disabled={saving}
-              onClick={() => void saveUpdates()}
-            >
-              Lưu cập nhật
-            </button>
-            {detail.status === 'IN_PROGRESS' && (
-              <button
-                type="button"
-                className="nx-btn-primary"
-                disabled={saving}
-                onClick={() => void setStatus('REVIEW')}
-              >
-                Nghiệm thu &amp; chuyển REVIEW
-              </button>
-            )}
-          </>
-        )}
       </div>
     </div>
   );

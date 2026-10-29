@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Alert } from 'react-bootstrap';
 import { Link, useNavigate } from 'react-router-dom';
 import api from '../api/client';
@@ -10,20 +10,45 @@ type Emp = {
   fullName: string;
   employeeCode: string;
   departmentId?: number | null;
-  position?: string | null;
   status: string;
 };
+
 type Dept = {
   id: number;
   name: string;
   departmentCode: string;
   status: string;
-  headcount?: number;
 };
 
 type Criterion = { id: string; title: string; category: string; done: boolean };
 
 const DRAFT_KEY = 'nexora-task-create-draft';
+
+const PRIORITIES = [
+  { val: 'LOW', label: 'LOW', hint: 'SLA ~14 ngày làm việc' },
+  { val: 'MEDIUM', label: 'MEDIUM', hint: 'SLA ~7 ngày làm việc' },
+  { val: 'HIGH', label: 'HIGH', hint: 'SLA ~3 ngày làm việc' },
+  { val: 'URGENT', label: 'URGENT', hint: 'SLA ~24 giờ' },
+] as const;
+
+function todayIso() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function workingDaysBetween(start: string, end: string): number | null {
+  if (!start || !end) return null;
+  const a = new Date(`${start}T00:00:00`);
+  const b = new Date(`${end}T00:00:00`);
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime()) || b < a) return null;
+  let count = 0;
+  const cur = new Date(a);
+  while (cur <= b) {
+    const dow = cur.getDay();
+    if (dow !== 0 && dow !== 6) count += 1;
+    cur.setDate(cur.getDate() + 1);
+  }
+  return count;
+}
 
 export default function TaskCreatePage() {
   const navigate = useNavigate();
@@ -32,20 +57,16 @@ export default function TaskCreatePage() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [projectName, setProjectName] = useState('');
-  const [departmentId, setDepartmentId] = useState('');
   const [assigneeId, setAssigneeId] = useState('');
-  const [reviewerId, setReviewerId] = useState('');
-  const [collaborators, setCollaborators] = useState<number[]>([]);
-  const [addCollab, setAddCollab] = useState('');
   const [priority, setPriority] = useState('MEDIUM');
-  const [startDate, setStartDate] = useState('');
+  const [startDate, setStartDate] = useState(todayIso());
   const [dueDate, setDueDate] = useState('');
-  const [estimatedHours, setEstimatedHours] = useState('8');
   const [criteria, setCriteria] = useState<Criterion[]>([
-    { id: 'c1', title: '', category: 'Backend', done: false },
+    { id: 'c1', title: '', category: 'Other', done: false },
   ]);
   const [emps, setEmps] = useState<Emp[]>([]);
   const [depts, setDepts] = useState<Dept[]>([]);
+  const [openTasks, setOpenTasks] = useState<number | null>(null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -69,14 +90,11 @@ export default function TaskCreatePage() {
         if (d.title) setTitle(d.title);
         if (d.description) setDescription(d.description);
         if (d.projectName) setProjectName(d.projectName);
-        if (d.departmentId) setDepartmentId(d.departmentId);
         if (d.assigneeId) setAssigneeId(d.assigneeId);
-        if (d.reviewerId) setReviewerId(d.reviewerId);
-        if (d.collaborators) setCollaborators(d.collaborators);
         if (d.priority) setPriority(d.priority);
         if (d.startDate) setStartDate(d.startDate);
+        else setStartDate(todayIso());
         if (d.dueDate) setDueDate(d.dueDate);
-        if (d.estimatedHours) setEstimatedHours(d.estimatedHours);
         if (d.criteria) setCriteria(d.criteria);
       }
     } catch {
@@ -84,34 +102,50 @@ export default function TaskCreatePage() {
     }
   }, []);
 
+  useEffect(() => {
+    const payload = {
+      title,
+      description,
+      projectName,
+      assigneeId,
+      priority,
+      startDate,
+      dueDate,
+      criteria,
+    };
+    try {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(payload));
+    } catch {
+      /* ignore */
+    }
+  }, [title, description, projectName, assigneeId, priority, startDate, dueDate, criteria]);
+
+  useEffect(() => {
+    if (!assigneeId) {
+      setOpenTasks(null);
+      return;
+    }
+    void api
+      .get<{ total: number }>('/tasks', {
+        params: {
+          assigneeId: Number(assigneeId),
+          scope: 'incomplete',
+          pageSize: 1,
+          page: 1,
+        },
+      })
+      .then((r) => setOpenTasks(r.data.total))
+      .catch(() => setOpenTasks(null));
+  }, [assigneeId]);
+
   const assignee = emps.find((e) => String(e.id) === assigneeId);
-  const dept = depts.find((d) => String(d.id) === departmentId);
-  const manDays = Math.round(((Number(estimatedHours) || 0) / 8) * 10) / 10;
-
-  function saveLocal() {
-    localStorage.setItem(
-      DRAFT_KEY,
-      JSON.stringify({
-        title,
-        description,
-        projectName,
-        departmentId,
-        assigneeId,
-        reviewerId,
-        collaborators,
-        priority,
-        startDate,
-        dueDate,
-        estimatedHours,
-        criteria,
-      }),
-    );
-  }
-
-  async function reloadCode() {
-    const { data } = await api.get('/tasks/next-code');
-    setTaskCode(data.taskCode);
-  }
+  const departmentId = assignee?.departmentId ?? null;
+  const dept = depts.find((d) => d.id === departmentId);
+  const assigner = emps.find((e) => e.id === user?.employeeId);
+  const workDays = useMemo(
+    () => workingDaysBetween(startDate, dueDate),
+    [startDate, dueDate],
+  );
 
   async function submit() {
     if (title.trim().length < 2) {
@@ -125,14 +159,11 @@ export default function TaskCreatePage() {
         title: title.trim(),
         description: description.trim() || undefined,
         projectName: projectName.trim() || undefined,
-        departmentId: departmentId ? Number(departmentId) : undefined,
+        departmentId: departmentId ?? undefined,
         assigneeId: assigneeId ? Number(assigneeId) : undefined,
-        reviewerEmployeeId: reviewerId ? Number(reviewerId) : undefined,
-        collaboratorIds: collaborators.length ? collaborators : undefined,
         priority,
         startDate: startDate || undefined,
         dueDate: dueDate || undefined,
-        estimatedHours: estimatedHours ? Number(estimatedHours) : undefined,
         criteria: criteria
           .filter((c) => c.title.trim())
           .map((c) => ({
@@ -157,11 +188,11 @@ export default function TaskCreatePage() {
         <div className="nx-tk-crumb">
           <Link to="/tasks">Quay lại danh sách</Link>
           <span>›</span>
-          <span>Quản lý công việc</span>
+          <span>Phân hệ Công việc</span>
           <span>›</span>
-          <span>Tạo công việc mới</span>
+          <span>Tạo &amp; giao công việc</span>
         </div>
-        <h1>Khởi Tạo &amp; Giao Việc Mới</h1>
+        <h1>Tạo &amp; Giao Công Việc Mới</h1>
       </div>
 
       {error && (
@@ -173,50 +204,23 @@ export default function TaskCreatePage() {
       <div className="nx-tc-grid">
         <div>
           <section className="nx-tc-card">
-            <h2>01 · Thông tin nhận diện &amp; phạm vi</h2>
-            <div className="nx-tc-field">
-              <label>Mã định danh công việc</label>
-              <div className="nx-tc-code-row">
-                <input value={taskCode} readOnly />
-                <button type="button" className="nx-btn-outline" onClick={() => void reloadCode()}>
-                  Tạo mã mới
-                </button>
-              </div>
-              <div className="nx-tc-hint">Mã được hệ thống cấp khi lưu (xem trước).</div>
-            </div>
+            <h2>01 · Thông tin nhận diện</h2>
             <div className="nx-tc-field">
               <label>
                 Tiêu đề công việc <span className="req">*</span>
               </label>
               <input
                 value={title}
-                maxLength={200}
+                maxLength={150}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="Mô tả ngắn gọn nhiệm vụ…"
               />
-              <div className="nx-tc-count">{title.length}/200</div>
+              <div className="nx-tc-count">{title.length}/150</div>
             </div>
             <div className="nx-tc-field">
-              <label>Khối phòng ban phụ trách</label>
-              <select
-                value={departmentId}
-                onChange={(e) => setDepartmentId(e.target.value)}
-              >
-                <option value="">— Chọn phòng ban —</option>
-                {depts
-                  .filter((d) => d.status === 'ACTIVE')
-                  .map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.name} ({d.departmentCode})
-                    </option>
-                  ))}
-              </select>
-              {dept && (
-                <div className="nx-tc-hint">
-                  {dept.name} · {dept.departmentCode}
-                  {dept.headcount != null ? ` · ${dept.headcount} NS` : ''}
-                </div>
-              )}
+              <label>Mã công việc (xem trước)</label>
+              <input value={taskCode} readOnly className="nx-tc-code-locked" />
+              <div className="nx-tc-hint">Mã chính thức được gán khi tạo thành công.</div>
             </div>
             <div className="nx-tc-field">
               <label>Dự án / module</label>
@@ -224,18 +228,68 @@ export default function TaskCreatePage() {
                 value={projectName}
                 onChange={(e) => setProjectName(e.target.value)}
                 placeholder="VD: Nexora Core v2"
+                list="nx-tc-projects"
               />
+              <datalist id="nx-tc-projects">
+                <option value="Nexora Core" />
+                <option value="Nexora HR" />
+                <option value="Nexora Ops" />
+              </datalist>
+            </div>
+            <div className="nx-tc-field">
+              <label>Mức độ ưu tiên</label>
+              <div className="nx-tc-prio-cards">
+                {PRIORITIES.map(({ val, label, hint }) => (
+                  <button
+                    key={val}
+                    type="button"
+                    className={`nx-tc-prio-card nx-tc-prio-${val.toLowerCase()}${priority === val ? ' active' : ''}`}
+                    onClick={() => setPriority(val)}
+                  >
+                    <strong>{label}</strong>
+                    <span>{hint}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           </section>
 
           <section className="nx-tc-card">
-            <h2>02 · Mô tả chi tiết nhiệm vụ</h2>
+            <h2>02 · Thời gian &amp; SLA</h2>
+            <div className="nx-tc-date-row">
+              <div className="nx-tc-field">
+                <label>Ngày bắt đầu</label>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                />
+              </div>
+              <div className="nx-tc-field">
+                <label>Hạn hoàn thành</label>
+                <input
+                  type="date"
+                  value={dueDate}
+                  min={startDate || undefined}
+                  onChange={(e) => setDueDate(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="nx-tc-hint nx-tc-workdays-hint">
+              {workDays != null
+                ? `Khoảng ${workDays} ngày làm việc (T2–T6) trong giai đoạn đã chọn.`
+                : 'Chọn ngày bắt đầu và hạn để xem số ngày làm việc.'}
+            </div>
+          </section>
+
+          <section className="nx-tc-card">
+            <h2>03 · Mô tả &amp; nghiệm thu</h2>
             <div className="nx-tc-field">
-              <label>Mô tả</label>
+              <label>Mô tả chi tiết</label>
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="Yêu cầu kỹ thuật, phạm vi, ràng buộc…"
+                placeholder="Yêu cầu, phạm vi, ràng buộc kỹ thuật…"
               />
             </div>
             <div className="nx-tc-field">
@@ -255,26 +309,13 @@ export default function TaskCreatePage() {
                         setCriteria(next);
                       }}
                     />
-                    <select
-                      value={c.category}
-                      onChange={(e) => {
-                        const next = [...criteria];
-                        next[idx] = { ...c, category: e.target.value };
-                        setCriteria(next);
-                      }}
-                    >
-                      <option>Backend</option>
-                      <option>Mobile UI</option>
-                      <option>QA / QC</option>
-                      <option>Docs</option>
-                      <option>Other</option>
-                    </select>
                     <button
                       type="button"
-                      className="nx-btn-outline"
+                      className="nx-btn-outline nx-tc-crit-rm"
                       onClick={() => setCriteria(criteria.filter((_, i) => i !== idx))}
+                      aria-label="Xóa tiêu chí"
                     >
-                      Xóa
+                      ×
                     </button>
                   </li>
                 ))}
@@ -289,184 +330,88 @@ export default function TaskCreatePage() {
                     {
                       id: `c${Date.now()}`,
                       title: '',
-                      category: 'Backend',
+                      category: 'Other',
                       done: false,
                     },
                   ])
                 }
               >
-                + Thêm tiêu chí nghiệm thu
+                + Thêm tiêu chí
               </button>
+            </div>
+            <div className="nx-tc-field">
+              <label>Tệp đính kèm (tùy chọn)</label>
+              <div className="nx-tc-dropzone" role="presentation">
+                <p>Kéo thả tệp vào đây hoặc bấm để chọn</p>
+                <span>Chưa hỗ trợ tải lên — chỉ hiển thị giao diện</span>
+              </div>
             </div>
           </section>
         </div>
 
-        <div>
-          <section className="nx-tc-card">
-            <h2>Người thực hiện &amp; giám sát</h2>
+        <aside>
+          <section className="nx-tc-card nx-tc-aside">
+            <h2>04 · Phân công &amp; phạm vi</h2>
             <div className="nx-tc-field">
-              <label>Người chịu trách nhiệm chính</label>
+              <label>Phạm vi / phòng ban</label>
+              <div className="nx-tc-scope-badge">
+                {dept ? (
+                  <>
+                    <strong>{dept.name}</strong>
+                    <span>{dept.departmentCode}</span>
+                  </>
+                ) : assignee ? (
+                  <span className="muted">Chưa gán phòng ban</span>
+                ) : (
+                  <span className="muted">Chọn người thực hiện để xem phạm vi</span>
+                )}
+              </div>
+            </div>
+            <div className="nx-tc-field">
+              <label>Người giao việc</label>
+              <input
+                readOnly
+                value={
+                  assigner
+                    ? `${assigner.fullName} (${assigner.employeeCode})`
+                    : user?.username || '—'
+                }
+                className="nx-tc-code-locked"
+              />
+            </div>
+            <div className="nx-tc-field">
+              <label>Người thực hiện</label>
               <select
                 value={assigneeId}
-                onChange={(e) => {
-                  const id = e.target.value;
-                  setAssigneeId(id);
-                  const emp = emps.find((x) => String(x.id) === id);
-                  if (emp?.departmentId && !departmentId) {
-                    setDepartmentId(String(emp.departmentId));
-                  }
-                }}
+                onChange={(e) => setAssigneeId(e.target.value)}
               >
-                <option value="">—</option>
+                <option value="">— Chọn nhân sự —</option>
                 {emps.map((e) => (
                   <option key={e.id} value={e.id}>
                     {e.fullName} ({e.employeeCode})
                   </option>
                 ))}
               </select>
-              {assignee && (
-                <div className="nx-tc-hint">
-                  {assignee.employeeCode}
-                  {assignee.position ? ` · ${assignee.position}` : ''}
+              {openTasks != null && assigneeId && (
+                <div className="nx-tc-capacity">
+                  Đang chạy: <strong>{openTasks}</strong> task
                 </div>
               )}
             </div>
             <div className="nx-tc-field">
-              <label>Người phối hợp</label>
-              <select
-                value={addCollab}
-                onChange={(e) => {
-                  const id = Number(e.target.value);
-                  if (id && !collaborators.includes(id)) {
-                    setCollaborators([...collaborators, id]);
-                  }
-                  setAddCollab('');
-                }}
-              >
-                <option value="">+ Thêm người</option>
-                {emps
-                  .filter(
-                    (e) =>
-                      !collaborators.includes(e.id) &&
-                      String(e.id) !== assigneeId,
-                  )
-                  .map((e) => (
-                    <option key={e.id} value={e.id}>
-                      {e.fullName}
-                    </option>
-                  ))}
-              </select>
-              <div className="nx-tc-chips">
-                {collaborators.map((id) => {
-                  const e = emps.find((x) => x.id === id);
-                  return (
-                    <span key={id} className="nx-tc-chip">
-                      {e?.fullName || id}
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setCollaborators(collaborators.filter((x) => x !== id))
-                        }
-                      >
-                        ×
-                      </button>
-                    </span>
-                  );
-                })}
-              </div>
-            </div>
-            <div className="nx-tc-field">
-              <label>Người duyệt nghiệm thu</label>
-              <select
-                value={reviewerId}
-                onChange={(e) => setReviewerId(e.target.value)}
-              >
-                <option value="">—</option>
-                {emps.map((e) => (
-                  <option key={e.id} value={e.id}>
-                    {e.fullName} ({e.employeeCode})
-                  </option>
-                ))}
-              </select>
-            </div>
-          </section>
-
-          <section className="nx-tc-card">
-            <h2>Tiến độ &amp; kiểm soát SLA</h2>
-            <div className="nx-tc-field">
-              <label>Ngày bắt đầu</label>
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-              />
-            </div>
-            <div className="nx-tc-field">
-              <label>Hạn chót (Deadline)</label>
-              <input
-                type="date"
-                value={dueDate}
-                onChange={(e) => setDueDate(e.target.value)}
-              />
-            </div>
-            <div className="nx-tc-field">
-              <label>Ước tính giờ công</label>
-              <input
-                type="number"
-                min={0}
-                value={estimatedHours}
-                onChange={(e) => setEstimatedHours(e.target.value)}
-              />
-              <div className="nx-tc-hint">
-                Tương đương ~{manDays} ngày công (8h/ngày)
+              <label>Trạng thái ban đầu</label>
+              <div className="nx-tc-status-fixed">
+                <span className="nx-tk-st todo">TODO</span>
+                <span className="nx-tc-hint">Cố định khi tạo mới</span>
               </div>
             </div>
           </section>
-
-          <section className="nx-tc-card">
-            <h2>Mức độ ưu tiên</h2>
-            <div className="nx-tc-prios">
-              {(
-                [
-                  ['LOW', 'LOW (Thấp)'],
-                  ['MEDIUM', 'MEDIUM (Vừa)'],
-                  ['HIGH', 'HIGH (Cao)'],
-                  ['URGENT', 'URGENT (Khẩn)'],
-                ] as const
-              ).map(([val, label]) => (
-                <label
-                  key={val}
-                  className={`nx-tc-prio${priority === val ? ' active' : ''}`}
-                >
-                  <input
-                    type="radio"
-                    name="pri"
-                    checked={priority === val}
-                    onChange={() => setPriority(val)}
-                    style={{ marginRight: 6 }}
-                  />
-                  <strong>{label}</strong>
-                </label>
-              ))}
-            </div>
-          </section>
-        </div>
+        </aside>
       </div>
 
-      <div className="nx-tc-foot">
+      <div className="nx-tc-foot nx-tc-foot-sticky">
         <button type="button" className="ghost" onClick={() => navigate('/tasks')}>
-          Hủy bỏ
-        </button>
-        <button
-          type="button"
-          className="nx-btn-outline"
-          onClick={() => {
-            saveLocal();
-            setError('');
-            alert('Đã lưu nháp trên trình duyệt');
-          }}
-        >
-          Lưu nháp
+          Huỷ bỏ
         </button>
         <div className="spacer" />
         <button
@@ -475,7 +420,7 @@ export default function TaskCreatePage() {
           disabled={saving}
           onClick={() => void submit()}
         >
-          {saving ? 'Đang tạo…' : 'Xác nhận tạo & Giao việc ngay'}
+          {saving ? 'Đang tạo…' : 'Tạo & Giao công việc'}
         </button>
       </div>
     </div>

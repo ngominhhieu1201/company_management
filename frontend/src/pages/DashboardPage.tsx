@@ -12,24 +12,37 @@ type AttendanceBlock = {
   onTimePct: number;
   latePct: number;
   notCheckedInPct: number;
-  avgCheckIn: string | null;
+  avgCheckIn?: string | null;
 };
 
 type LeaveItem = {
   id: number;
   employeeName: string;
+  employeePosition?: string | null;
   leaveTypeLabel: string;
   startDate: string;
   endDate: string;
+  reason?: string | null;
+  urgency?: string;
 };
 
 type TaskItem = {
   id: number;
   title: string;
   assigneeName: string;
+  assigneePosition?: string | null;
   dueDate: string | null;
   priority: string;
+  status: string;
   progress: number;
+};
+
+type ActionItem = {
+  id: string;
+  kind: string;
+  label: string;
+  href: string;
+  dueHint: string | null;
 };
 
 type AdminStats = {
@@ -43,6 +56,32 @@ type AdminStats = {
   attendance: AttendanceBlock;
   pendingLeaveRequests: LeaveItem[];
   activeTasks: TaskItem[];
+  tasksByStatus?: Record<string, number>;
+};
+
+type ManagerStats = {
+  role: 'MANAGER';
+  managerName: string;
+  managerPosition: string;
+  departmentName: string;
+  employees: number;
+  headcountTarget: number | null;
+  workingToday: number;
+  workingPct: number;
+  openTasks: number;
+  inProgressCount: number;
+  needReviewCount: number;
+  dueSoon: number;
+  pendingLeave: number;
+  onTime: number;
+  late: number;
+  onTimePct: number;
+  attendance: AttendanceBlock;
+  pendingLeaveRequests: LeaveItem[];
+  activeTasks: TaskItem[];
+  inProgressTasks: TaskItem[];
+  reviewTasks: TaskItem[];
+  actionItems: ActionItem[];
   tasksByStatus?: Record<string, number>;
 };
 
@@ -87,16 +126,32 @@ function formatDateRange(start: string, end: string) {
   return `${fmt(start)} – ${fmt(end)}`;
 }
 
+function formatDue(due: string | null) {
+  if (!due) return '—';
+  const today = new Date().toISOString().slice(0, 10);
+  if (due === today) return 'Hôm nay';
+  return formatDateRange(due, due);
+}
+
 function priorityClass(p: string) {
-  if (p === 'HIGH' || p === 'URGENT') return 'high';
+  if (p === 'URGENT') return 'urgent';
+  if (p === 'HIGH') return 'high';
   if (p === 'LOW') return 'low';
   return 'medium';
 }
 
 function priorityLabel(p: string) {
-  if (p === 'HIGH' || p === 'URGENT') return 'Cao';
-  if (p === 'LOW') return 'Thấp';
-  return 'Trung bình';
+  if (p === 'URGENT') return 'P0 KHẨN CẤP';
+  if (p === 'HIGH') return 'P1 ƯU TIÊN CAO';
+  if (p === 'LOW') return 'P3 THẤP';
+  return 'P2 TRUNG BÌNH';
+}
+
+function statusLabel(s: string, progress: number) {
+  if (s === 'REVIEW') return 'Cần duyệt';
+  if (s === 'DONE') return 'Hoàn thành';
+  if (s === 'TODO') return 'Chưa bắt đầu';
+  return `Đang làm ${progress}%`;
 }
 
 function Donut({
@@ -209,6 +264,18 @@ export default function DashboardPage() {
       <div className="text-center py-5">
         <Spinner />
       </div>
+    );
+  }
+
+  if (stats.role === 'MANAGER') {
+    return (
+      <ManagerDashboard
+        stats={stats as unknown as ManagerStats}
+        error={error}
+        busyId={busyId}
+        now={now}
+        onReviewLeave={reviewLeave}
+      />
     );
   }
 
@@ -429,6 +496,327 @@ export default function DashboardPage() {
           </div>
         )}
       </section>
+    </div>
+  );
+}
+
+function ManagerDashboard({
+  stats,
+  error,
+  busyId,
+  now,
+  onReviewLeave,
+}: {
+  stats: ManagerStats;
+  error: string;
+  busyId: number | null;
+  now: Date;
+  onReviewLeave: (id: number, decision: 'APPROVED' | 'REJECTED') => void;
+}) {
+  const [tab, setTab] = useState<'doing' | 'review'>('doing');
+  const rows =
+    tab === 'doing' ? stats.inProgressTasks : stats.reviewTasks;
+  const att = stats.attendance;
+
+  return (
+    <div className="nx-mgr">
+      {error && <Alert variant="danger">{error}</Alert>}
+
+      <div className="nx-mgr-head">
+        <div>
+          <div className="nx-dash-kicker">{formatViDate(now)}</div>
+          <h1>
+            {greetingForHour(now.getHours())}, Quản lý {stats.managerName}!
+          </h1>
+          <p className="nx-mgr-scope">
+            <span className="nx-mgr-dept">{stats.departmentName}</span>
+            <span className="nx-mgr-dot" />
+            <span>
+              <strong>{stats.employees}</strong> nhân sự trực thuộc
+            </span>
+            {stats.headcountTarget != null && (
+              <>
+                <span className="nx-mgr-dot" />
+                <span>
+                  Hạn ngạch định biên:{' '}
+                  <strong>
+                    {stats.employees}/{stats.headcountTarget} vị trí
+                  </strong>
+                </span>
+              </>
+            )}
+          </p>
+        </div>
+        <div className="nx-mgr-actions">
+          <Link to="/tasks/new" className="nx-btn-primary">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            Giao việc mới
+          </Link>
+          <Link to="/leave" className="nx-btn-outline nx-mgr-quick">
+            Duyệt nhanh
+            {stats.pendingLeave > 0 ? (
+              <em>({stats.pendingLeave} đơn)</em>
+            ) : null}
+          </Link>
+        </div>
+      </div>
+
+      <div className="nx-kpi-grid">
+        <div className="nx-kpi">
+          <div className="nx-kpi-icon blue">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <circle cx="9" cy="8" r="3" />
+              <circle cx="16.5" cy="9" r="2.5" />
+              <path d="M3.5 19c1.5-2.8 3.6-4.2 5.5-4.2s4 1.4 5.5 4.2M13.5 15.2c1.3-.7 2.8-1 4.3-.7 1.4.3 2.6 1.1 3.7 2.5" />
+            </svg>
+          </div>
+          <div>
+            <div className="nx-kpi-label">Nhân sự trực thuộc</div>
+            <div className="nx-kpi-value">{stats.employees}</div>
+            <div className="nx-kpi-hint">nhân viên trong phạm vi</div>
+          </div>
+        </div>
+        <div className="nx-kpi">
+          <div className="nx-kpi-icon orange">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <rect x="4" y="4" width="16" height="16" rx="3" />
+              <path d="m8 12 2.5 2.5L16 9" />
+            </svg>
+          </div>
+          <div>
+            <div className="nx-kpi-label">Công việc đang xử lý</div>
+            <div className="nx-kpi-value">{stats.openTasks}</div>
+            <div className="nx-kpi-hint">
+              {stats.dueSoon > 0
+                ? `${stats.dueSoon} sắp đến hạn`
+                : 'nhiệm vụ đang mở'}
+            </div>
+          </div>
+        </div>
+        <div className="nx-kpi">
+          <div className="nx-kpi-icon green">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <circle cx="12" cy="12" r="8" />
+              <path d="M12 8v4.5l3 1.5" />
+            </svg>
+          </div>
+          <div>
+            <div className="nx-kpi-label">Chấm công hôm nay</div>
+            <div className="nx-kpi-value">
+              {att.checkedIn}
+              <span className="nx-kpi-sub"> / {stats.employees}</span>
+            </div>
+            <div className="nx-kpi-hint up">
+              {att.onTime} đúng giờ · {att.late} muộn
+            </div>
+          </div>
+        </div>
+        <div className="nx-kpi">
+          <div className="nx-kpi-icon purple">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <rect x="4" y="5" width="16" height="15" rx="2" />
+              <path d="M8 3v4M16 3v4M4 10h16" />
+            </svg>
+          </div>
+          <div>
+            <div className="nx-kpi-label">Nghỉ phép chờ duyệt</div>
+            <div className="nx-kpi-value">
+              {String(stats.pendingLeave).padStart(2, '0')}
+            </div>
+            <div className="nx-kpi-hint">yêu cầu mới</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="nx-mgr-body">
+        <section className="nx-panel nx-mgr-tasks">
+          <div className="nx-mgr-panel-head">
+            <h2 className="nx-panel-title" style={{ margin: 0 }}>
+              Bảng công việc gần đây
+            </h2>
+            <div className="nx-mgr-tabs">
+              <button
+                type="button"
+                className={tab === 'doing' ? 'on' : ''}
+                onClick={() => setTab('doing')}
+              >
+                Đang làm ({stats.inProgressCount})
+              </button>
+              <button
+                type="button"
+                className={tab === 'review' ? 'on' : ''}
+                onClick={() => setTab('review')}
+              >
+                Cần duyệt ({stats.needReviewCount})
+              </button>
+              <Link to="/tasks" className="nx-mgr-kanban">
+                Kanban →
+              </Link>
+            </div>
+          </div>
+
+          {rows.length === 0 ? (
+            <div className="nx-empty">Chưa có công việc trong mục này.</div>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table className="nx-tasks-table">
+                <thead>
+                  <tr>
+                    <th>Hạng mục công việc</th>
+                    <th>Phụ trách</th>
+                    <th>Hạn chót</th>
+                    <th>Trạng thái</th>
+                    <th>Mức độ</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((t) => (
+                    <tr key={t.id}>
+                      <td>
+                        <strong>{t.title}</strong>
+                      </td>
+                      <td>
+                        <div className="nx-mgr-assignee">
+                          <span className="nx-leave-avatar sm">
+                            {initials(t.assigneeName)}
+                          </span>
+                          <span>
+                            <b>{t.assigneeName}</b>
+                            {t.assigneePosition && (
+                              <small>{t.assigneePosition}</small>
+                            )}
+                          </span>
+                        </div>
+                      </td>
+                      <td>{formatDue(t.dueDate)}</td>
+                      <td>
+                        {t.status === 'IN_PROGRESS' || t.status === 'TODO' ? (
+                          <div className="nx-progress">
+                            <div className="nx-progress-bar">
+                              <span style={{ width: `${t.progress}%` }} />
+                            </div>
+                            <em>{statusLabel(t.status, t.progress)}</em>
+                          </div>
+                        ) : (
+                          <span className="nx-status-pill">
+                            {statusLabel(t.status, t.progress)}
+                          </span>
+                        )}
+                      </td>
+                      <td>
+                        <span className={`nx-prio ${priorityClass(t.priority)}`}>
+                          {priorityLabel(t.priority)}
+                        </span>
+                      </td>
+                      <td>
+                        <Link
+                          to={`/tasks/${t.id}`}
+                          className="nx-icon-act"
+                          title="Chi tiết"
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M9 5h11M9 12h11M9 19h11M4 5h.01M4 12h.01M4 19h.01" />
+                          </svg>
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <div className="nx-mgr-foot">
+            <span>
+              Hiển thị {rows.length} trên tổng số {stats.openTasks} nhiệm vụ phân
+              công
+            </span>
+            <Link to="/tasks">Xem toàn bộ bảng Kanban</Link>
+          </div>
+        </section>
+
+        <aside className="nx-mgr-side">
+          <section className="nx-panel">
+            <div className="nx-mgr-panel-head">
+              <h2 className="nx-panel-title" style={{ margin: 0 }}>
+                Đơn nghỉ phép chờ duyệt
+              </h2>
+              {stats.pendingLeave > 0 && (
+                <span className="nx-mgr-badge">{stats.pendingLeave}</span>
+              )}
+            </div>
+            <div className="nx-mgr-leave-list">
+              {stats.pendingLeaveRequests.length === 0 && (
+                <div className="nx-empty">Không có đơn chờ duyệt.</div>
+              )}
+              {stats.pendingLeaveRequests.map((row) => (
+                <div className="nx-mgr-leave-card" key={row.id}>
+                  <div className="nx-mgr-leave-top">
+                    <div className="nx-leave-avatar">
+                      {initials(row.employeeName)}
+                    </div>
+                    <div className="nx-leave-meta">
+                      <strong>{row.employeeName}</strong>
+                      <span>
+                        {row.employeePosition || 'Nhân viên'} ·{' '}
+                        {formatDateRange(row.startDate, row.endDate)}
+                      </span>
+                    </div>
+                    <span className="nx-leave-type">{row.leaveTypeLabel}</span>
+                  </div>
+                  {row.reason && (
+                    <p className="nx-mgr-leave-reason">
+                      {row.reason.length > 90
+                        ? `${row.reason.slice(0, 90)}…`
+                        : row.reason}
+                    </p>
+                  )}
+                  <div className="nx-mgr-leave-btns">
+                    <button
+                      type="button"
+                      className="nx-btn-approve"
+                      disabled={busyId === row.id}
+                      onClick={() => void onReviewLeave(row.id, 'APPROVED')}
+                    >
+                      Chấp thuận
+                    </button>
+                    <button
+                      type="button"
+                      className="nx-btn-reject"
+                      disabled={busyId === row.id}
+                      onClick={() => void onReviewLeave(row.id, 'REJECTED')}
+                    >
+                      Từ chối
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="nx-panel">
+            <h2 className="nx-panel-title">Việc quản lý cần thực hiện</h2>
+            {stats.actionItems.length === 0 ? (
+              <div className="nx-empty">Không có việc cần xử lý.</div>
+            ) : (
+              <ul className="nx-mgr-todo">
+                {stats.actionItems.map((item) => (
+                  <li key={item.id}>
+                    <span className="nx-mgr-check" aria-hidden />
+                    <div>
+                      <Link to={item.href}>{item.label}</Link>
+                      {item.dueHint && <small>{item.dueHint}</small>}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </aside>
+      </div>
     </div>
   );
 }

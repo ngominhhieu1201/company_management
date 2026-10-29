@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Spinner } from 'react-bootstrap';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import api from '../api/client';
@@ -38,11 +38,19 @@ type Detail = {
   audit: { id: number; action: string; createdAt: string; actorUsername: string }[];
 };
 
+type Stats = { onLeaveToday: number; today: string };
+
 const TYPE: Record<string, string> = {
-  ANNUAL: 'PHÉP NĂM',
-  SICK: 'ỐM ĐAU BHXH',
-  UNPAID: 'KHÔNG LƯƠNG',
-  OTHER: 'VIỆC RIÊNG',
+  ANNUAL: 'Phép năm (AL)',
+  SICK: 'Ốm đau BHXH',
+  UNPAID: 'Không lương',
+  OTHER: 'Việc riêng',
+};
+
+const ST: Record<string, string> = {
+  PENDING: 'Chờ duyệt',
+  APPROVED: 'Đã duyệt',
+  REJECTED: 'Từ chối',
 };
 
 function fmt(iso: string | null | undefined) {
@@ -56,12 +64,28 @@ function fmt(iso: string | null | undefined) {
   return `${day}/${m}/${y}`;
 }
 
+function initials(n: string) {
+  const p = n.trim().split(/\s+/).filter(Boolean);
+  if (!p.length) return '?';
+  if (p.length === 1) return p[0].slice(0, 2).toUpperCase();
+  return (p[0][0] + p[p.length - 1][0]).toUpperCase();
+}
+
+function auditLabel(action: string) {
+  if (action === 'LEAVE_CREATE') return 'Tạo đơn nghỉ phép';
+  if (action === 'LEAVE_APPROVED') return 'Phê duyệt đơn';
+  if (action === 'LEAVE_REJECTED') return 'Từ chối đơn';
+  return action;
+}
+
 export default function LeaveDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const auditRef = useRef<HTMLElement>(null);
   const { user } = useAuth();
   const canReview = user?.role === 'ADMIN' || user?.role === 'MANAGER';
   const [detail, setDetail] = useState<Detail | null>(null);
+  const [stats, setStats] = useState<Stats | null>(null);
   const [comment, setComment] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -72,9 +96,13 @@ export default function LeaveDetailPage() {
     if (!id) return;
     setLoading(true);
     try {
-      const { data } = await api.get<Detail>(`/leave/${id}`);
-      setDetail(data);
-      setComment(data.reviewComment || '');
+      const [detailRes, statsRes] = await Promise.all([
+        api.get<Detail>(`/leave/${id}`),
+        api.get<Stats>('/leave/stats').catch(() => ({ data: null })),
+      ]);
+      setDetail(detailRes.data);
+      setComment(detailRes.data.reviewComment || '');
+      setStats(statsRes.data);
       setError('');
     } catch {
       setError('Không tải được đơn');
@@ -84,14 +112,22 @@ export default function LeaveDetailPage() {
     }
   }, [id]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   async function review(decision: 'APPROVED' | 'REJECTED') {
     if (!detail) return;
+    if (decision === 'REJECTED' && !comment.trim() && !window.confirm('Từ chối không kèm nhận xét?')) {
+      return;
+    }
     setSaving(true);
     try {
-      await api.patch(`/leave/${detail.id}/review`, { decision, comment: comment.trim() || undefined });
-      setOk(decision === 'APPROVED' ? 'Đã phê duyệt' : 'Đã từ chối');
+      await api.patch(`/leave/${detail.id}/review`, {
+        decision,
+        comment: comment.trim() || undefined,
+      });
+      setOk(decision === 'APPROVED' ? 'Đã chấp thuận đơn' : 'Đã từ chối đơn');
       await load();
     } catch {
       setError('Phê duyệt thất bại');
@@ -100,127 +136,226 @@ export default function LeaveDetailPage() {
     }
   }
 
-  if (loading) return <div className="py-5 text-center"><Spinner size="sm" animation="border" /></div>;
-  if (!detail) {
+  if (loading) {
     return (
-      <div>
-        <Alert variant="danger">{error || 'Không tìm thấy'}</Alert>
-        <Link to="/leave">← Quay lại</Link>
+      <div className="py-5 text-center">
+        <Spinner size="sm" animation="border" />
       </div>
     );
   }
 
+  if (!detail) {
+    return (
+      <div>
+        <Alert variant="danger">{error || 'Không tìm thấy'}</Alert>
+        <Link to="/leave">← Quay lại danh sách</Link>
+      </div>
+    );
+  }
+
+  const eligible = detail.quota.remainingAfter >= 0;
+
   return (
     <div className="nx-ld">
       <div className="nx-lv-crumb">
-        <Link to="/leave">Quay lại danh sách</Link><span>›</span><span>Chi tiết đơn</span>
+        <Link to="/leave">Quản lý nghỉ phép</Link>
+        <span>›</span>
+        <span>Chi tiết &amp; phê duyệt</span>
       </div>
-      <div className="nx-lv-head">
+
+      <div className="nx-ld-top">
         <div>
-          <h1>Chi Tiết Đơn Nghỉ Phép & Thẩm Định Phê Duyệt</h1>
+          <h1 className="nx-ld-title">
+            Chi Tiết &amp; Thẩm Định Phê Duyệt
+            <span className="nx-lv-code"> #{detail.leaveCode}</span>
+          </h1>
           <div className="nx-ld-badges">
-            <span className={`nx-lv-st ${detail.status}`}>{detail.status}</span>
-            <span className={`nx-lv-type ${detail.leaveType}`}>{TYPE[detail.leaveType]}</span>
-            {detail.urgency === 'URGENT' && (
-              <span className="nx-lv-st REJECTED">KHẨN CẤP / 24H</span>
-            )}
-            <span className="nx-lv-code">#{detail.leaveCode}</span>
+            <span className={`nx-lv-st ${detail.status}`}>{ST[detail.status] || detail.status}</span>
+            {detail.urgency === 'URGENT' && <span className="nx-lv-urgent-tag">KHẨN CẤP</span>}
           </div>
         </div>
+        <div className="nx-ld-top-links">
+          <Link to="/leave" className="nx-btn-outline">
+            ← Danh sách đơn
+          </Link>
+          <button
+            type="button"
+            className="nx-btn-outline"
+            onClick={() => auditRef.current?.scrollIntoView({ behavior: 'smooth' })}
+          >
+            Lịch sử
+          </button>
+        </div>
       </div>
+
       {error && <Alert variant="danger">{error}</Alert>}
       {ok && <Alert variant="success">{ok}</Alert>}
+
+      <section className="nx-ld-card nx-ld-emp-card">
+        <div className="nx-lv-emp">
+          <div className="nx-lv-avatar lg">{initials(detail.employee?.fullName || '?')}</div>
+          <div>
+            <strong className="nx-lv-emp-name">{detail.employee?.fullName}</strong>
+            <span className="nx-lv-sub">
+              {detail.employee?.employeeCode} · {detail.employee?.position || '—'} ·{' '}
+              {detail.department?.name || '—'}
+            </span>
+            {detail.employee?.email && <span className="nx-lv-sub">{detail.employee.email}</span>}
+          </div>
+        </div>
+        <div className="nx-lc-quota-cards compact">
+          <div className="nx-lc-qcard">
+            <span>Định mức</span>
+            <strong>{detail.quota.annualQuota}</strong>
+          </div>
+          <div className="nx-lc-qcard">
+            <span>Đã dùng</span>
+            <strong>{detail.quota.used}</strong>
+          </div>
+          <div className="nx-lc-qcard">
+            <span>Đơn này</span>
+            <strong>{detail.quota.thisRequest}</strong>
+          </div>
+          <div className="nx-lc-qcard highlight">
+            <span>Còn sau đợt</span>
+            <strong>{detail.quota.remainingAfter}</strong>
+          </div>
+        </div>
+        <div className={`nx-lc-eligibility${eligible ? ' ok' : ' bad'}`}>
+          {eligible ? 'ĐỦ ĐIỀU KIỆN PHÊ DUYỆT' : 'VƯỢT QUỸ PHÉP NĂM'}
+        </div>
+      </section>
 
       <div className="nx-ld-layout">
         <div>
           <section className="nx-ld-card">
-            <h2>Thông tin nhân sự & quỹ phép</h2>
+            <h2>Nội dung đơn nghỉ</h2>
             <div className="nx-ld-meta">
-              <div><span>Họ tên</span><strong>{detail.employee?.fullName}</strong></div>
-              <div><span>Mã NV / Chức danh</span>{detail.employee?.employeeCode} · {detail.employee?.position || '—'}</div>
-              <div><span>Phòng ban</span>{detail.department?.name || '—'}</div>
-              <div><span>Email</span>{detail.employee?.email || '—'}</div>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8, marginTop: 12 }}>
-              <div className="nx-lc-summary" style={{ background: '#f7faf8', color: 'inherit' }}>
-                <div style={{ fontSize: '.7rem', color: '#7a8a85' }}>Định mức</div>
-                <strong>{detail.quota.annualQuota}</strong>
+              <div>
+                <span>Loại phép</span>
+                <span className={`nx-lv-type ${detail.leaveType}`}>
+                  {TYPE[detail.leaveType] || detail.leaveType}
+                </span>
               </div>
-              <div className="nx-lc-summary" style={{ background: '#f7faf8', color: 'inherit' }}>
-                <div style={{ fontSize: '.7rem', color: '#7a8a85' }}>Đã dùng</div>
-                <strong>{detail.quota.used}</strong>
+              <div>
+                <span>Thời gian nghỉ</span>
+                <strong>
+                  {fmt(detail.startDate)} → {fmt(detail.endDate)} ({detail.daysCount} ngày làm việc)
+                </strong>
               </div>
-              <div className="nx-lc-summary">
-                <div style={{ fontSize: '.7rem' }}>Đơn này</div>
-                <strong>{detail.quota.thisRequest} ngày</strong>
+              <div>
+                <span>Lý do</span>
+                <p className="nx-ld-reason">{detail.reason || '—'}</p>
               </div>
-              <div className="nx-lc-summary" style={{ background: '#e8f1fb', color: '#1565c0' }}>
-                <div style={{ fontSize: '.7rem' }}>Còn sau đợt</div>
-                <strong>{detail.quota.remainingAfter}</strong>
+              <div>
+                <span>Người bàn giao</span>
+                <strong>
+                  {detail.handover?.fullName || '—'}
+                  {detail.handover?.position ? ` · ${detail.handover.position}` : ''}
+                </strong>
+              </div>
+              <div>
+                <span>Chứng từ</span>
+                <strong>{detail.attachmentName || 'Không yêu cầu'}</strong>
               </div>
             </div>
           </section>
 
-          <section className="nx-ld-card">
-            <h2>Thời gian & kế hoạch bàn giao</h2>
-            <div className="nx-ld-meta">
-              <div><span>Thời gian</span>{fmt(detail.startDate)} → {fmt(detail.endDate)} ({detail.daysCount} ngày)</div>
-              <div><span>Lý do</span>{detail.reason || '—'}</div>
-              <div><span>Người bàn giao</span>{detail.handover?.fullName || '—'}{detail.handover?.position ? ` · ${detail.handover.position}` : ''}</div>
-              {detail.attachmentName && <div><span>Chứng từ</span>{detail.attachmentName}</div>}
-            </div>
+          <section className="nx-ld-card" ref={auditRef}>
+            <h2>Nhật ký &amp; lịch sử</h2>
+            <ul className="nx-ld-timeline">
+              {detail.audit.length === 0 && (
+                <li className="nx-ld-timeline-item muted">Chưa có sự kiện</li>
+              )}
+              {detail.audit.map((a) => (
+                <li key={a.id} className="nx-ld-timeline-item">
+                  <i className="dot" />
+                  <div>
+                    <strong>{auditLabel(a.action)}</strong>
+                    <div className="nx-lv-sub">
+                      {a.actorUsername} · {fmt(a.createdAt)}
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+            {detail.reviewerName && (
+              <div className="nx-ld-reviewed">
+                Quyết định bởi <strong>{detail.reviewerName}</strong> · {fmt(detail.reviewedAt)}
+                {detail.reviewComment && (
+                  <blockquote className="nx-ld-review-quote">{detail.reviewComment}</blockquote>
+                )}
+              </div>
+            )}
           </section>
         </div>
 
         <aside>
           {canReview && detail.status === 'PENDING' && (
-            <section className="nx-ld-card">
-              <h3>Thẩm quyền quyết định</h3>
+            <section className="nx-ld-card nx-ld-review-card">
+              <h3>Thẩm định phê duyệt</h3>
+              <div className="nx-ld-capacity">
+                <strong>Ảnh hưởng nhân sự hôm nay</strong>
+                <p>
+                  {stats != null ? (
+                    <>
+                      Có <strong>{stats.onLeaveToday}</strong> nhân viên đang nghỉ phép ({stats.today}).
+                      Kiểm tra phạm vi phòng ban trước khi duyệt.
+                    </>
+                  ) : (
+                    <>Kiểm tra phạm vi phòng ban và năng lực thay thế trước khi quyết định.</>
+                  )}
+                </p>
+              </div>
               <div className="nx-lc-field">
                 <label>Nhận xét phê duyệt</label>
-                <textarea rows={4} value={comment} onChange={(e) => setComment(e.target.value)} />
+                <textarea
+                  rows={4}
+                  value={comment}
+                  onChange={(e) => setComment(e.target.value)}
+                  placeholder="Ghi chú cho nhân viên (tuỳ chọn)…"
+                />
               </div>
-              <button type="button" className="nx-btn-primary" style={{ width: '100%', marginBottom: 8 }} disabled={saving} onClick={() => void review('APPROVED')}>
-                Chấp thuận & phê duyệt
-              </button>
-              <button type="button" className="nx-btn-outline" style={{ width: '100%', color: '#c62828', borderColor: '#f5c6c6' }} disabled={saving} onClick={() => void review('REJECTED')}>
-                Từ chối đơn
-              </button>
+              <div className="nx-ld-review-btns">
+                <button
+                  type="button"
+                  className="nx-ld-btn reject"
+                  disabled={saving}
+                  onClick={() => void review('REJECTED')}
+                >
+                  Từ chối
+                </button>
+                <button
+                  type="button"
+                  className="nx-btn-primary"
+                  disabled={saving}
+                  onClick={() => void review('APPROVED')}
+                >
+                  Chấp thuận
+                </button>
+              </div>
             </section>
           )}
 
-          <section className="nx-ld-card">
-            <h3>Quy trình duyệt</h3>
-            <ul className="nx-ld-flow">
-              <li className="on"><i className="dot" />Nhân viên gửi đơn</li>
-              <li className={detail.handover ? 'on' : ''}><i className="dot" />Bàn giao{detail.handover ? ' (đã gán)' : ''}</li>
-              <li className={detail.status !== 'PENDING' ? 'on' : ''}><i className="dot" />Quản lý / Admin {detail.status === 'PENDING' ? '(chờ)' : detail.status}</li>
-              <li className={detail.status === 'APPROVED' ? 'on' : ''}><i className="dot" />Hoàn tất</li>
-            </ul>
-            {detail.reviewerName && (
-              <div style={{ fontSize: '.8rem', color: '#7a8a85', marginTop: 8 }}>
-                Duyệt bởi {detail.reviewerName} · {fmt(detail.reviewedAt)}
-              </div>
-            )}
-          </section>
-
-          <section className="nx-ld-card">
-            <h3>Nhật ký</h3>
-            <ul className="nx-ld-audit">
-              {detail.audit.map((a) => (
-                <li key={a.id}>
-                  <strong>{a.action}</strong>
-                  <div style={{ fontSize: '.72rem', color: '#7a8a85' }}>{a.actorUsername} · {fmt(a.createdAt)}</div>
-                </li>
-              ))}
-              {detail.audit.length === 0 && <li style={{ color: '#7a8a85' }}>Chưa có</li>}
-            </ul>
-          </section>
+          {(!canReview || detail.status !== 'PENDING') && (
+            <section className="nx-ld-card">
+              <h3>Trạng thái xử lý</h3>
+              <p className="nx-lv-sub">
+                {detail.status === 'PENDING'
+                  ? 'Đơn đang chờ quản lý phê duyệt.'
+                  : detail.status === 'APPROVED'
+                    ? 'Đơn đã được chấp thuận.'
+                    : 'Đơn đã bị từ chối.'}
+              </p>
+            </section>
+          )}
         </aside>
       </div>
 
       <div className="nx-ld-foot">
-        <button type="button" className="ghost" onClick={() => navigate('/leave')}>Danh sách đơn</button>
+        <button type="button" className="ghost" onClick={() => navigate('/leave')}>
+          Quay lại danh sách
+        </button>
         <div className="spacer" />
       </div>
     </div>

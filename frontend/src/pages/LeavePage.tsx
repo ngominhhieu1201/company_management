@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, Spinner } from 'react-bootstrap';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import api from '../api/client';
+import { useAuth } from '../contexts/AuthContext';
 import '../styles/leave.css';
 
 type Row = {
@@ -15,10 +16,16 @@ type Row = {
   urgency: string;
   reason: string | null;
   createdAt: string;
-  employee: { fullName: string; employeeCode: string; position?: string | null } | null;
+  attachmentName: string | null;
+  reviewerName?: string | null;
+  reviewedAt?: string | null;
+  employee: {
+    fullName: string;
+    employeeCode: string;
+    position?: string | null;
+  } | null;
   department: { name: string } | null;
   handover: { fullName: string } | null;
-  quota: { remaining: number; annualQuota: number };
 };
 
 type Stats = {
@@ -29,6 +36,7 @@ type Stats = {
   rejected: number;
   rejectedPct: number;
   onLeaveToday: number;
+  avgResponseHours?: number | null;
   byType: Record<string, number>;
   month: string;
   today: string;
@@ -41,16 +49,24 @@ const TYPE_LABEL: Record<string, string> = {
   OTHER: 'Việc riêng',
 };
 
+const ST_LABEL: Record<string, string> = {
+  PENDING: 'Chờ duyệt',
+  APPROVED: 'Đã duyệt',
+  REJECTED: 'Từ chối',
+};
+
 function initials(n: string) {
   const p = n.trim().split(/\s+/).filter(Boolean);
   if (!p.length) return '?';
   if (p.length === 1) return p[0].slice(0, 2).toUpperCase();
   return (p[0][0] + p[p.length - 1][0]).toUpperCase();
 }
+
 function fmt(iso: string) {
   const [y, m, d] = iso.slice(0, 10).split('-');
   return `${d}/${m}/${y}`;
 }
+
 function fmtDt(iso: string) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return fmt(iso);
@@ -59,46 +75,58 @@ function fmtDt(iso: string) {
 }
 
 function exportCsv(rows: Row[]) {
-  const header = ['Code', 'Employee', 'Type', 'Start', 'End', 'Days', 'Status'];
+  const header = ['Code', 'Employee', 'Type', 'Start', 'End', 'Days', 'Status', 'Handover', 'Attachment'];
   const lines = rows.map((r) =>
-    [r.leaveCode, r.employee?.fullName ?? '', r.leaveType, r.startDate, r.endDate, r.daysCount, r.status]
+    [
+      r.leaveCode,
+      r.employee?.fullName ?? '',
+      r.leaveType,
+      r.startDate,
+      r.endDate,
+      r.daysCount,
+      r.status,
+      r.handover?.fullName ?? '',
+      r.attachmentName ?? '',
+    ]
       .map((c) => `"${String(c).replace(/"/g, '""')}"`)
       .join(','),
   );
-  const blob = new Blob([[header.join(','), ...lines].join('\n')], { type: 'text/csv;charset=utf-8' });
+  const blob = new Blob([[header.join(','), ...lines].join('\n')], {
+    type: 'text/csv;charset=utf-8',
+  });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `nexora-leave.csv`;
+  a.download = 'nexora-leave.csv';
   a.click();
   URL.revokeObjectURL(url);
 }
 
 export default function LeavePage() {
-  const navigate = useNavigate();
+  const { user } = useAuth();
+  const canReview = user?.role === 'ADMIN' || user?.role === 'MANAGER';
   const [items, setItems] = useState<Row[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
-  const [depts, setDepts] = useState<{ id: number; name: string }[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [actionBusy, setActionBusy] = useState<number | null>(null);
   const [qDraft, setQDraft] = useState('');
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('');
   const [leaveType, setLeaveType] = useState('');
-  const [departmentId, setDepartmentId] = useState('');
   const [chip, setChip] = useState('all');
 
   const load = useCallback(async () => {
     const params: Record<string, string | number> = { page, pageSize: 10 };
     if (q) params.q = q;
-    if (status) params.status = status;
     if (leaveType) params.leaveType = leaveType;
-    if (departmentId) params.departmentId = Number(departmentId);
     if (chip === 'pending') params.status = 'PENDING';
-    if (chip === 'ANNUAL' || chip === 'SICK' || chip === 'OTHER') params.leaveType = chip;
+    else if (chip === 'APPROVED' || chip === 'REJECTED') params.status = chip;
+    else if (chip === 'SICK') params.leaveType = 'SICK';
+    else if (status) params.status = status;
 
     const [s, list] = await Promise.all([
       api.get<Stats>('/leave/stats'),
@@ -108,7 +136,7 @@ export default function LeavePage() {
     setItems(list.data.items);
     setTotal(list.data.total);
     setTotalPages(list.data.totalPages);
-  }, [page, q, status, leaveType, departmentId, chip]);
+  }, [page, q, status, leaveType, chip]);
 
   useEffect(() => {
     let c = false;
@@ -123,70 +151,121 @@ export default function LeavePage() {
         if (!c) setLoading(false);
       }
     })();
-    return () => { c = true; };
+    return () => {
+      c = true;
+    };
   }, [load]);
 
   useEffect(() => {
-    api.get('/departments').then((r) => setDepts(r.data)).catch(() => undefined);
-  }, []);
-
-  useEffect(() => {
-    const t = setTimeout(() => { setQ(qDraft.trim()); setPage(1); }, 300);
+    const t = setTimeout(() => {
+      setQ(qDraft.trim());
+      setPage(1);
+    }, 300);
     return () => clearTimeout(t);
   }, [qDraft]);
+
+  async function quickReview(e: React.MouseEvent, id: number, decision: 'APPROVED' | 'REJECTED') {
+    e.stopPropagation();
+    if (!canReview) return;
+    if (decision === 'REJECTED' && !window.confirm('Từ chối đơn nghỉ này?')) return;
+    setActionBusy(id);
+    try {
+      await api.patch(`/leave/${id}/review`, { decision });
+      await load();
+    } catch {
+      setError('Thao tác phê duyệt thất bại');
+    } finally {
+      setActionBusy(null);
+    }
+  }
+
+  const slaDisplay =
+    stats?.avgResponseHours != null && stats.avgResponseHours > 0
+      ? `${stats.avgResponseHours}h`
+      : '—';
 
   return (
     <div>
       <div className="nx-lv-crumb">
-        <span>Quản trị hệ thống</span><span>›</span><span>Quản lý nghỉ phép</span>
+        <span>Quản trị hệ thống</span>
+        <span>›</span>
+        <span>Quản lý nghỉ phép</span>
       </div>
       <div className="nx-lv-head">
-        <h1>Quản Lý Đơn Nghỉ Phép & Phê Duyệt Toàn Doanh Nghiệp</h1>
+        <h1>Quản Lý &amp; Tiếp Nhận Đơn Nghỉ Phép</h1>
         <div className="nx-lv-actions">
-          <button type="button" className="nx-btn-outline" onClick={() => exportCsv(items)}>Xuất báo cáo</button>
-          <Link to="/leave/new" className="nx-btn-primary">+ Tạo đơn mới</Link>
+          <button type="button" className="nx-btn-outline" onClick={() => exportCsv(items)}>
+            Xuất Excel
+          </button>
+          <Link to="/leave/new" className="nx-btn-primary">
+            + Tạo đơn
+          </Link>
         </div>
       </div>
-      {error && <Alert variant="danger" dismissible onClose={() => setError('')}>{error}</Alert>}
+      {error && (
+        <Alert variant="danger" dismissible onClose={() => setError('')}>
+          {error}
+        </Alert>
+      )}
 
       {stats && (
         <div className="nx-lv-kpis">
           <div className="nx-lv-kpi">
-            <div className="label">Đơn chờ phê duyệt</div>
+            <div className="label">Chờ phê duyệt</div>
             <div className="value">{stats.pending}</div>
-            <span className="badge">ƯU TIÊN {stats.pendingUrgent}</span>
+            {stats.pendingUrgent > 0 && (
+              <span className="badge nx-lv-kpi-warn">Khẩn {stats.pendingUrgent}</span>
+            )}
           </div>
           <div className="nx-lv-kpi">
-            <div className="label">Đã phê duyệt tháng này</div>
+            <div className="label">Đã duyệt tháng</div>
             <div className="value">{stats.approvedMonth}</div>
             <span className="badge">{stats.month}</span>
           </div>
           <div className="nx-lv-kpi">
-            <div className="label">Từ chối</div>
-            <div className="value">{stats.rejected}</div>
-            <span className="badge">{stats.rejectedPct}%</span>
-          </div>
-          <div className="nx-lv-kpi">
-            <div className="label">Đang nghỉ hôm nay</div>
+            <div className="label">Đang vắng hôm nay</div>
             <div className="value">{stats.onLeaveToday}</div>
             <span className="badge">{stats.today}</span>
+          </div>
+          <div className="nx-lv-kpi">
+            <div className="label">SLA phản hồi</div>
+            <div className="value">{slaDisplay}</div>
+            <span className="badge">TB từ gửi → duyệt</span>
           </div>
         </div>
       )}
 
       <div className="nx-lv-filters">
         <label className="search">
-          <input value={qDraft} onChange={(e) => setQDraft(e.target.value)} placeholder="Tìm mã đơn OFF-, mã NV, họ tên…" />
+          <input
+            value={qDraft}
+            onChange={(e) => setQDraft(e.target.value)}
+            placeholder="Tìm mã đơn OFF-, mã NV, họ tên…"
+          />
         </label>
-        <select value={departmentId} onChange={(e) => { setDepartmentId(e.target.value); setPage(1); }}>
-          <option value="">Tất cả phòng ban</option>
-          {depts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-        </select>
-        <select value={leaveType} onChange={(e) => { setLeaveType(e.target.value); setChip('all'); setPage(1); }}>
+        <select
+          value={leaveType}
+          onChange={(e) => {
+            setLeaveType(e.target.value);
+            setChip('all');
+            setPage(1);
+          }}
+        >
           <option value="">Tất cả loại phép</option>
-          {Object.entries(TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          {Object.entries(TYPE_LABEL).map(([k, v]) => (
+            <option key={k} value={k}>
+              {v}
+            </option>
+          ))}
         </select>
-        <select value={status} onChange={(e) => { setStatus(e.target.value); setChip('all'); setPage(1); }}>
+        <select
+          value={status}
+          onChange={(e) => {
+            setStatus(e.target.value);
+            setChip('all');
+            setPage(1);
+          }}
+        >
           <option value="">Tất cả trạng thái</option>
           <option value="PENDING">Chờ duyệt</option>
           <option value="APPROVED">Đã duyệt</option>
@@ -195,21 +274,35 @@ export default function LeavePage() {
       </div>
 
       <div className="nx-lv-chips">
-        {[
-          ['all', `Tất cả (${stats?.total ?? 0})`],
-          ['pending', `Chờ duyệt (${stats?.pending ?? 0})`],
-          ['ANNUAL', `Phép năm (${stats?.byType?.ANNUAL ?? 0})`],
-          ['SICK', `Ốm đau (${stats?.byType?.SICK ?? 0})`],
-          ['OTHER', `Việc riêng (${stats?.byType?.OTHER ?? 0})`],
-        ].map(([k, label]) => (
-          <button key={k} type="button" className={`nx-lv-chip${chip === k ? ' active' : ''}`} onClick={() => { setChip(k); setStatus(''); setLeaveType(''); setPage(1); }}>
+        {(
+          [
+            ['all', `Tất cả (${stats?.total ?? 0})`],
+            ['pending', `Chờ duyệt (${stats?.pending ?? 0})`],
+            ['APPROVED', 'Đã duyệt'],
+            ['REJECTED', `Từ chối (${stats?.rejected ?? 0})`],
+            ['SICK', `Ốm đau (${stats?.byType?.SICK ?? 0})`],
+          ] as const
+        ).map(([k, label]) => (
+          <button
+            key={k}
+            type="button"
+            className={`nx-lv-chip${chip === k ? ' active' : ''}`}
+            onClick={() => {
+              setChip(k);
+              setStatus('');
+              setLeaveType('');
+              setPage(1);
+            }}
+          >
             {label}
           </button>
         ))}
       </div>
 
       {loading ? (
-        <div className="py-5 text-center"><Spinner size="sm" animation="border" /></div>
+        <div className="py-5 text-center">
+          <Spinner size="sm" animation="border" />
+        </div>
       ) : (
         <div className="nx-lv-wrap">
           <table className="nx-lv-table">
@@ -220,55 +313,117 @@ export default function LeavePage() {
                 <th>Loại</th>
                 <th>Thời gian</th>
                 <th>Bàn giao</th>
-                <th>Quỹ phép năm</th>
+                <th>Chứng từ</th>
                 <th>Trạng thái</th>
+                <th className="nx-lv-th-actions">Thao tác</th>
               </tr>
             </thead>
             <tbody>
-              {items.length === 0 && <tr><td colSpan={7} style={{ textAlign: 'center', color: '#7a8a85' }}>Không có đơn</td></tr>}
-              {items.map((r) => {
-                const remPct = Math.round((r.quota.remaining / Math.max(1, r.quota.annualQuota)) * 100);
-                return (
-                  <tr key={r.id} onClick={() => navigate(`/leave/${r.id}`)}>
-                    <td>
-                      <div className="nx-lv-code">#{r.leaveCode}</div>
-                      <div style={{ fontSize: '.72rem', color: '#7a8a85' }}>{fmtDt(r.createdAt)}</div>
-                    </td>
-                    <td>
-                      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                        <div style={{ width: 32, height: 32, borderRadius: '50%', background: '#004036', color: '#fff', display: 'grid', placeItems: 'center', fontSize: 11, fontWeight: 800 }}>
-                          {initials(r.employee?.fullName || '?')}
-                        </div>
-                        <div>
-                          <strong style={{ display: 'block' }}>{r.employee?.fullName}</strong>
-                          <span style={{ fontSize: '.72rem', color: '#7a8a85' }}>{r.employee?.employeeCode} · {r.department?.name || '—'}</span>
-                        </div>
+              {items.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="nx-lv-empty">
+                    Không có đơn
+                  </td>
+                </tr>
+              )}
+              {items.map((r) => (
+                <tr key={r.id}>
+                  <td>
+                    <div className="nx-lv-code">#{r.leaveCode}</div>
+                    <div className="nx-lv-sub">{fmtDt(r.createdAt)}</div>
+                    {r.urgency === 'URGENT' && <span className="nx-lv-urgent-tag">KHẨN</span>}
+                  </td>
+                  <td>
+                    <div className="nx-lv-emp">
+                      <div className="nx-lv-avatar">{initials(r.employee?.fullName || '?')}</div>
+                      <div>
+                        <strong className="nx-lv-emp-name">{r.employee?.fullName}</strong>
+                        <span className="nx-lv-sub">
+                          {r.employee?.employeeCode}
+                          {r.employee?.position ? ` · ${r.employee.position}` : ''}
+                        </span>
                       </div>
-                    </td>
-                    <td>
-                      <span className={`nx-lv-type ${r.leaveType}`}>{TYPE_LABEL[r.leaveType] || r.leaveType}</span>
-                      {r.urgency === 'URGENT' && <div style={{ fontSize: '.7rem', color: '#c62828', fontWeight: 700 }}>Khẩn</div>}
-                    </td>
-                    <td>
-                      <strong style={{ display: 'block' }}>{fmt(r.startDate)} – {fmt(r.endDate)}</strong>
-                      <span style={{ fontSize: '.75rem', color: '#7a8a85' }}>{r.daysCount} ngày làm việc</span>
-                    </td>
-                    <td>{r.handover?.fullName || <span style={{ color: '#7a8a85' }}>Chưa gán</span>}</td>
-                    <td>
-                      <div style={{ fontSize: '.82rem', fontWeight: 700 }}>Còn {r.quota.remaining}/{r.quota.annualQuota}</div>
-                      <div className="nx-lv-bar"><i style={{ width: `${remPct}%` }} /></div>
-                    </td>
-                    <td><span className={`nx-lv-st ${r.status}`}>{r.status}</span></td>
-                  </tr>
-                );
-              })}
+                    </div>
+                  </td>
+                  <td>
+                    <span className={`nx-lv-type ${r.leaveType}`}>
+                      {TYPE_LABEL[r.leaveType] || r.leaveType}
+                    </span>
+                  </td>
+                  <td>
+                    <strong className="nx-lv-dates">
+                      {fmt(r.startDate)} – {fmt(r.endDate)}
+                    </strong>
+                    <span className="nx-lv-sub">{r.daysCount} ngày làm việc</span>
+                  </td>
+                  <td>{r.handover?.fullName || <span className="nx-lv-muted">Chưa gán</span>}</td>
+                  <td>
+                    {r.attachmentName ? (
+                      <span className="nx-lv-attach">{r.attachmentName}</span>
+                    ) : (
+                      <span className="nx-lv-muted">Không yêu cầu</span>
+                    )}
+                  </td>
+                  <td>
+                    <span className={`nx-lv-st ${r.status}`}>{ST_LABEL[r.status] || r.status}</span>
+                    {r.status === 'APPROVED' && r.reviewerName && (
+                      <div className="nx-lv-sub">Duyệt: {r.reviewerName}</div>
+                    )}
+                  </td>
+                  <td className="nx-lv-actions-cell">
+                    {r.status === 'PENDING' && canReview && (
+                      <>
+                        <button
+                          type="button"
+                          className="nx-lv-act ok"
+                          disabled={actionBusy === r.id}
+                          onClick={(e) => void quickReview(e, r.id, 'APPROVED')}
+                        >
+                          Duyệt
+                        </button>
+                        <button
+                          type="button"
+                          className="nx-lv-act no"
+                          disabled={actionBusy === r.id}
+                          onClick={(e) => void quickReview(e, r.id, 'REJECTED')}
+                        >
+                          Từ chối
+                        </button>
+                      </>
+                    )}
+                    <Link
+                      to={`/leave/${r.id}`}
+                      className="nx-lv-act link"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      Chi tiết
+                    </Link>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
           <div className="nx-lv-pager">
-            <div>Trang {page}/{totalPages} · {total} đơn</div>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <button type="button" className="nx-btn-outline" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>‹</button>
-              <button type="button" className="nx-btn-outline" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>›</button>
+            <div>
+              Trang {page}/{totalPages} · {total} đơn
+            </div>
+            <div className="nx-lv-pager-btns">
+              <button
+                type="button"
+                className="nx-btn-outline"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => p - 1)}
+              >
+                ‹
+              </button>
+              <button
+                type="button"
+                className="nx-btn-outline"
+                disabled={page >= totalPages}
+                onClick={() => setPage((p) => p + 1)}
+              >
+                ›
+              </button>
             </div>
           </div>
         </div>

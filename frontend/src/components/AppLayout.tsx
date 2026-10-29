@@ -21,11 +21,22 @@ const links: {
   {
     to: '/users',
     label: 'Quản lý tài khoản',
-    roles: ['ADMIN'],
+    roles: ['ADMIN', 'MANAGER'],
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
         <circle cx="12" cy="8" r="3.5" />
         <path d="M5 19.5c1.8-3.2 4.2-4.8 7-4.8s5.2 1.6 7 4.8" />
+      </svg>
+    ),
+  },
+  {
+    to: '/account',
+    label: 'Tài khoản cá nhân',
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <circle cx="12" cy="8" r="3.5" />
+        <path d="M6 20v-1a5 5 0 0 1 10 0v1" />
+        <path d="M17 11h4M19 9v4" />
       </svg>
     ),
   },
@@ -196,13 +207,13 @@ export default function AppLayout() {
                 <path d="m7 10 5 5 5-5" />
               </svg>
             </span>
-            <div className="nx-profile">
+            <NavLink to="/account" className="nx-profile" style={{ textDecoration: 'none', color: 'inherit' }}>
               <div className="nx-avatar">{initials(displayName)}</div>
               <div className="nx-profile-meta">
                 <strong>{displayName}</strong>
                 <span>{roleLabel(user?.role)}</span>
               </div>
-            </div>
+            </NavLink>
           </div>
         </header>
         <main className="nx-content">

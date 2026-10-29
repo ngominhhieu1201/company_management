@@ -271,17 +271,70 @@ export class TasksService {
             (open.reduce((s, t) => s + t.progress, 0) / open.length) * 10,
           ) / 10
         : 0;
+    const done = rows.filter((t) => t.status === TaskStatus.DONE).length;
+    const incomplete = active;
+    const todo = rows.filter((t) => t.status === TaskStatus.TODO).length;
+    const doneOnTime = rows.filter((t) => {
+      if (t.status !== TaskStatus.DONE) return false;
+      if (!t.dueDate) return true;
+      const finished = new Date(t.updatedAt).toISOString().slice(0, 10);
+      return finished <= t.dueDate;
+    }).length;
+    const onTimePct =
+      done > 0 ? Math.round((doneOnTime / done) * 1000) / 10 : 100;
+    const donePct =
+      rows.length > 0 ? Math.round((done / rows.length) * 1000) / 10 : 0;
+    const finishedWithDates = rows.filter(
+      (t) => t.status === TaskStatus.DONE && t.startDate && t.updatedAt,
+    );
+    const avgDays =
+      finishedWithDates.length > 0
+        ? Math.round(
+            (finishedWithDates.reduce((s, t) => {
+              const a = new Date(t.startDate as string).getTime();
+              const b = new Date(t.updatedAt).getTime();
+              return s + Math.max(0, (b - a) / 86400000);
+            }, 0) /
+              finishedWithDates.length) *
+              10,
+          ) / 10
+        : null;
+
+    let scopeDeptCode: string | null = null;
+    let scopeEmployees = 0;
+    if (user.role === UserRole.MANAGER && user.employeeId) {
+      const depts = await this.deptRepo.find({
+        where: { managerEmployeeId: user.employeeId },
+      });
+      scopeDeptCode = depts[0]?.departmentCode ?? null;
+      const deptIds = depts.map((d) => d.id);
+      const emps = await this.empRepo.find();
+      scopeEmployees = emps.filter(
+        (e) =>
+          e.id === user.employeeId ||
+          (e.departmentId != null && deptIds.includes(e.departmentId)),
+      ).length;
+    }
+
     return {
       total: rows.length,
       active,
+      incomplete,
       inProgress,
       review,
+      todo,
+      done,
+      donePct,
       doneSprint,
       mine,
       urgent,
       soonSla,
       overdue,
+      onTimePct,
+      avgDays,
       avgProgress,
+      scopeDeptCode,
+      scopeEmployees,
       byPriority: {
         URGENT: rows.filter((t) => t.priority === 'URGENT').length,
         HIGH: rows.filter((t) => t.priority === 'HIGH').length,
@@ -289,10 +342,10 @@ export class TasksService {
         LOW: rows.filter((t) => t.priority === 'LOW').length,
       },
       byStatus: {
-        TODO: rows.filter((t) => t.status === TaskStatus.TODO).length,
+        TODO: todo,
         IN_PROGRESS: inProgress,
         REVIEW: review,
-        DONE: rows.filter((t) => t.status === TaskStatus.DONE).length,
+        DONE: done,
       },
     };
   }
@@ -326,6 +379,12 @@ export class TasksService {
       rows = rows.filter((t) => t.assigneeId === query.assigneeId);
     if (query.scope === 'mine' && user.employeeId) {
       rows = rows.filter((t) => t.assigneeId === user.employeeId);
+    }
+    if (query.scope === 'incomplete' || query.scope === 'open') {
+      rows = rows.filter((t) => t.status !== TaskStatus.DONE);
+    }
+    if (query.scope === 'done') {
+      rows = rows.filter((t) => t.status === TaskStatus.DONE);
     }
     if (query.scope === 'urgent') {
       rows = rows.filter(

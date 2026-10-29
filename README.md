@@ -50,7 +50,7 @@
 | Chức năng | Admin | Manager | Employee |
 |-----------|-------|---------|----------|
 | Quản lý tài khoản / nhật ký | Có | Không (API 403 + UI ẩn/redirect) | Không |
-| Nhân sự / phòng ban | Toàn công ty | Phạm vi quản lý | Xem theo API scope (hồ sơ liên quan) |
+| Nhân sự / phòng ban | Toàn công ty | Phạm vi QL: list + chi tiết + sửa hồ sơ (`/employees`, `/employees/:id`, `/employees/:id/edit`); không đổi phòng ban khi sửa | Xem/sửa hạn chế theo scope |
 | Tạo / giao việc | Có | Phạm vi quản lý | Không (UI chặn `/tasks/new`) |
 | Cập nhật công việc được giao | Có | Có | Có |
 | Chấm công ảnh | Theo chính sách | Theo chính sách | Check-in/out + lịch sử bản thân |

@@ -12,9 +12,26 @@ import {
   AccountStatus,
   EmployeeStatus,
   LeaveStatus,
+  LeaveType,
   TaskStatus,
   UserRole,
 } from '../common/enums';
+
+const LATE_AFTER_MINUTES = 8 * 60 + 30; // 08:30
+
+const LEAVE_TYPE_LABEL: Record<LeaveType, string> = {
+  [LeaveType.ANNUAL]: 'Nghỉ phép năm',
+  [LeaveType.SICK]: 'Nghỉ ốm',
+  [LeaveType.UNPAID]: 'Nghỉ không lương',
+  [LeaveType.OTHER]: 'Nghỉ khác',
+};
+
+type PresenceInfo = {
+  kind: 'WORKING' | 'LATE' | 'LEAVE' | 'SUSPENDED' | 'ABSENT';
+  label: string;
+  checkInTime: string | null;
+  leaveType: string | null;
+};
 import { AttendanceRecord } from '../attendance/attendance.entity';
 import { Department } from '../departments/department.entity';
 import { LeaveRequest } from '../leave/leave-request.entity';
@@ -83,6 +100,72 @@ export class EmployeesService {
     return list;
   }
 
+  private async presenceMap(empIds: number[]) {
+    const today = new Date().toISOString().slice(0, 10);
+    const map = new Map<number, PresenceInfo>();
+    if (empIds.length === 0) return map;
+
+    const attRows = await this.attendance.find({
+      where: { workDate: today, employeeId: In(empIds) },
+    });
+    const attByEmp = new Map(attRows.map((r) => [r.employeeId, r]));
+
+    const leaveRows = await this.leaveRepo.find({
+      where: { status: LeaveStatus.APPROVED },
+    });
+    const leaveToday = leaveRows.filter(
+      (l) =>
+        empIds.includes(l.employeeId) &&
+        l.startDate <= today &&
+        l.endDate >= today,
+    );
+    const leaveByEmp = new Map(leaveToday.map((l) => [l.employeeId, l]));
+
+    for (const id of empIds) {
+      const leave = leaveByEmp.get(id);
+      if (leave) {
+        map.set(id, {
+          kind: 'LEAVE',
+          label: `${LEAVE_TYPE_LABEL[leave.leaveType] ?? 'Nghỉ phép'} (có đơn)`,
+          checkInTime: null,
+          leaveType: leave.leaveType,
+        });
+        continue;
+      }
+      const att = attByEmp.get(id);
+      if (att?.checkInTime) {
+        const d = new Date(att.checkInTime);
+        const mins = d.getHours() * 60 + d.getMinutes();
+        const hh = String(d.getHours()).padStart(2, '0');
+        const mm = String(d.getMinutes()).padStart(2, '0');
+        const time = `${hh}:${mm}`;
+        if (mins > LATE_AFTER_MINUTES) {
+          map.set(id, {
+            kind: 'LATE',
+            label: `Đi muộn (${time})`,
+            checkInTime: time,
+            leaveType: null,
+          });
+        } else {
+          map.set(id, {
+            kind: 'WORKING',
+            label: `Đang làm việc (${time})`,
+            checkInTime: time,
+            leaveType: null,
+          });
+        }
+        continue;
+      }
+      map.set(id, {
+        kind: 'ABSENT',
+        label: 'Chưa chấm công',
+        checkInTime: null,
+        leaveType: null,
+      });
+    }
+    return map;
+  }
+
   private async enrich(emps: Employee[]) {
     const depts = await this.deptRepo.find();
     const deptMap = new Map(depts.map((d) => [d.id, d]));
@@ -94,11 +177,33 @@ export class EmployeesService {
         .filter((u) => u.employeeId != null)
         .map((u) => [u.employeeId as number, u]),
     );
+    const presence = await this.presenceMap(emps.map((e) => e.id));
 
     return emps.map((e) => {
       const dept =
         e.departmentId != null ? deptMap.get(e.departmentId) : undefined;
       const acc = byEmp.get(e.id);
+      let todayPresence = presence.get(e.id) ?? {
+        kind: 'ABSENT' as const,
+        label: 'Chưa chấm công',
+        checkInTime: null,
+        leaveType: null,
+      };
+      if (e.status === EmployeeStatus.SUSPENDED) {
+        todayPresence = {
+          kind: 'SUSPENDED',
+          label: 'Tạm dừng công tác',
+          checkInTime: null,
+          leaveType: null,
+        };
+      } else if (e.status === EmployeeStatus.INACTIVE) {
+        todayPresence = {
+          kind: 'ABSENT',
+          label: 'Đã nghỉ việc',
+          checkInTime: null,
+          leaveType: null,
+        };
+      }
       return {
         id: e.id,
         employeeCode: e.employeeCode,
@@ -107,6 +212,7 @@ export class EmployeesService {
         phone: e.phone,
         departmentId: e.departmentId,
         departmentName: dept?.name ?? null,
+        departmentCode: dept?.departmentCode ?? null,
         position: e.position,
         hireDate: e.hireDate,
         dateOfBirth: e.dateOfBirth,
@@ -124,6 +230,7 @@ export class EmployeesService {
         status: e.status,
         createdAt: e.createdAt,
         updatedAt: e.updatedAt,
+        todayPresence,
         account: acc
           ? {
               id: acc.id,
@@ -214,7 +321,52 @@ export class EmployeesService {
           : 0;
       return t >= cutoff;
     }).length;
-    return { total, active, inactive, newLast30Days };
+
+    const enriched = await this.enrich(list);
+    const workingToday = enriched.filter(
+      (e) =>
+        e.todayPresence.kind === 'WORKING' || e.todayPresence.kind === 'LATE',
+    ).length;
+    const onLeaveToday = enriched.filter(
+      (e) => e.todayPresence.kind === 'LEAVE',
+    ).length;
+    const accountsActive = enriched.filter(
+      (e) => e.account.linked && !e.account.locked,
+    ).length;
+    const accountsLocked = enriched.filter(
+      (e) => e.account.linked && e.account.locked,
+    ).length;
+
+    let departmentName: string | null = null;
+    let departmentCode: string | null = null;
+    let headcountTarget: number | null = null;
+    if (user.role === UserRole.MANAGER) {
+      const deptIds = await this.managedDepartmentIds(user);
+      const depts = deptIds.length
+        ? await this.deptRepo.find({ where: { id: In(deptIds) } })
+        : [];
+      const primary = depts[0] ?? null;
+      departmentName = primary?.name ?? null;
+      departmentCode = primary?.departmentCode ?? null;
+      headcountTarget =
+        depts.reduce((s, d) => s + (d.headcountTarget ?? 0), 0) || null;
+    }
+
+    return {
+      total,
+      active,
+      inactive,
+      newLast30Days,
+      workingToday,
+      workingPct:
+        total > 0 ? Math.round((workingToday / total) * 1000) / 10 : 0,
+      onLeaveToday,
+      accountsActive,
+      accountsLocked,
+      headcountTarget,
+      departmentName,
+      departmentCode,
+    };
   }
 
   async findAll(user: AuthUser, query: ListEmployeesQueryDto = {}) {
@@ -236,6 +388,10 @@ export class EmployeesService {
     if (query.status) {
       list = list.filter((e) => e.status === query.status);
     }
+    if (query.position?.trim()) {
+      const p = query.position.trim().toLowerCase();
+      list = list.filter((e) => (e.position || '').toLowerCase().includes(p));
+    }
 
     const sort = query.sort || 'code_asc';
     list = [...list].sort((a, b) => {
@@ -252,7 +408,35 @@ export class EmployeesService {
       return a.employeeCode.localeCompare(b.employeeCode, 'vi');
     });
 
-    const enriched = await this.enrich(list);
+    let enriched = await this.enrich(list);
+
+    const account = query.account?.toUpperCase();
+    if (account === 'ACTIVE') {
+      enriched = enriched.filter((e) => e.account.linked && !e.account.locked);
+    } else if (account === 'LOCKED') {
+      enriched = enriched.filter((e) => e.account.linked && e.account.locked);
+    } else if (account === 'NONE') {
+      enriched = enriched.filter((e) => !e.account.linked);
+    }
+
+    const presence = query.presence?.toUpperCase();
+    if (presence === 'WORKING') {
+      enriched = enriched.filter(
+        (e) =>
+          e.todayPresence.kind === 'WORKING' ||
+          e.todayPresence.kind === 'LATE',
+      );
+    } else if (presence === 'ABSENT') {
+      enriched = enriched.filter(
+        (e) =>
+          e.todayPresence.kind === 'LEAVE' ||
+          e.todayPresence.kind === 'ABSENT' ||
+          e.todayPresence.kind === 'SUSPENDED',
+      );
+    } else if (presence === 'LOCKED') {
+      enriched = enriched.filter((e) => e.account.linked && e.account.locked);
+    }
+
     const page = Math.max(1, query.page ?? 1);
     const pageSize = Math.min(100, Math.max(1, query.pageSize ?? 25));
     const total = enriched.length;
@@ -353,6 +537,22 @@ export class EmployeesService {
     }
   }
 
+  private yearsOfService(hireDate: string | null) {
+    if (!hireDate) return null;
+    const start = new Date(hireDate);
+    if (Number.isNaN(start.getTime())) return null;
+    const ms = Date.now() - start.getTime();
+    return Math.round((ms / (365.25 * 86400000)) * 10) / 10;
+  }
+
+  private fmtClock(d: Date | string | null | undefined) {
+    if (!d) return null;
+    const x = new Date(d);
+    if (Number.isNaN(x.getTime())) return null;
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${pad(x.getHours())}:${pad(x.getMinutes())}:${pad(x.getSeconds())}`;
+  }
+
   async findOne(id: number, user: AuthUser) {
     const emp = await this.repo.findOne({ where: { id } });
     if (!emp) throw new NotFoundException('Employee not found');
@@ -362,48 +562,257 @@ export class EmployeesService {
     const now = new Date();
     const y = now.getFullYear();
     const m = now.getMonth();
+    const today = now.toISOString().slice(0, 10);
     const monthPrefix = `${y}-${String(m + 1).padStart(2, '0')}`;
     const expectedDays = this.workingDaysInMonth(y, m);
 
     const att = await this.attendance.find({
       where: { employeeId: emp.id },
+      order: { workDate: 'DESC' },
     });
     const attendedDays = new Set(
       att
         .filter((r) => String(r.workDate).startsWith(monthPrefix) && r.checkInTime)
         .map((r) => String(r.workDate).slice(0, 10)),
     ).size;
+    const monthAtt = att.filter(
+      (r) => String(r.workDate).startsWith(monthPrefix) && r.checkInTime,
+    );
+    const onTimeMonth = monthAtt.filter((r) => {
+      if (!r.checkInTime) return false;
+      const d = new Date(r.checkInTime);
+      return d.getHours() * 60 + d.getMinutes() <= LATE_AFTER_MINUTES;
+    }).length;
+
+    const todayRow = att.find((r) => String(r.workDate).slice(0, 10) === today);
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yday = yesterday.toISOString().slice(0, 10);
+    const ydayRow = att.find((r) => String(r.workDate).slice(0, 10) === yday);
 
     const myTasks = await this.tasks.find({
       where: { assigneeId: emp.id },
+      order: { updatedAt: 'DESC' },
     });
     const taskTotal = myTasks.length;
+    const taskDone = myTasks.filter((t) => t.status === TaskStatus.DONE).length;
+    const taskRunning = myTasks.filter(
+      (t) =>
+        t.status === TaskStatus.IN_PROGRESS ||
+        t.status === TaskStatus.TODO ||
+        t.status === TaskStatus.REVIEW,
+    ).length;
     const avgProgress =
       taskTotal === 0
         ? 0
         : Math.round(
             myTasks.reduce(
-              (s, t) => s + this.progressFromStatus(t.status),
+              (s, t) =>
+                s + (t.progress > 0 ? t.progress : this.progressFromStatus(t.status)),
               0,
             ) / taskTotal,
           );
 
-    const leaves = await this.leaveRepo.find({
-      where: { employeeId: emp.id, status: LeaveStatus.APPROVED },
+    const allLeaves = await this.leaveRepo.find({
+      where: { employeeId: emp.id },
+      order: { createdAt: 'DESC' },
     });
-    const usedLeave = leaves
+    const approvedLeaves = allLeaves.filter(
+      (l) => l.status === LeaveStatus.APPROVED,
+    );
+    const usedLeave = approvedLeaves
       .filter((l) => String(l.startDate).startsWith(String(y)))
       .reduce((s, l) => s + this.daySpan(l.startDate, l.endDate), 0);
     const leaveRemaining = Math.max(0, ANNUAL_LEAVE_DAYS - usedLeave);
+    const lastApproved = approvedLeaves[0] ?? null;
+
+    const projects = [
+      ...new Set(
+        myTasks
+          .map((t) => t.projectName)
+          .filter((p): p is string => Boolean(p && p.trim())),
+      ),
+    ];
+
+    const dept =
+      emp.departmentId != null
+        ? await this.deptRepo.findOne({ where: { id: emp.departmentId } })
+        : null;
 
     const canSeeNationalId =
       user.role === UserRole.ADMIN || user.role === UserRole.MANAGER;
 
+    const creators = await this.users.find();
+    const creatorMap = new Map(creators.map((u) => [u.id, u]));
+    const allEmpBrief = await this.repo.find();
+    const empNameMap = new Map(allEmpBrief.map((e) => [e.id, e]));
+
+    const leaveByDate = new Map<string, (typeof allLeaves)[0]>();
+    for (const l of approvedLeaves) {
+      const start = new Date(l.startDate);
+      const end = new Date(l.endDate);
+      for (
+        let d = new Date(start);
+        d.getTime() <= end.getTime();
+        d.setDate(d.getDate() + 1)
+      ) {
+        leaveByDate.set(d.toISOString().slice(0, 10), l);
+      }
+    }
+
+    const mapTask = (t: (typeof myTasks)[0]) => {
+      const creator = creatorMap.get(t.createdBy);
+      const creatorEmp =
+        creator?.employeeId != null
+          ? empNameMap.get(creator.employeeId)
+          : undefined;
+      return {
+        id: t.id,
+        taskCode: t.taskCode || `TSK-${t.id}`,
+        title: t.title,
+        status: t.status,
+        priority: t.priority,
+        progress: t.progress > 0 ? t.progress : this.progressFromStatus(t.status),
+        startDate: t.startDate,
+        dueDate: t.dueDate,
+        projectName: t.projectName,
+        createdByName:
+          creatorEmp?.fullName || creator?.username || `User #${t.createdBy}`,
+      };
+    };
+
+    const mapAttendance = (r: (typeof att)[0]) => {
+      const dateKey = String(r.workDate).slice(0, 10);
+      const leave = leaveByDate.get(dateKey);
+      let checkInHint: string | null = null;
+      let checkOutHint: string | null = null;
+      let statusLabel = 'Chưa chấm';
+      let credit = 0;
+      if (leave) {
+        statusLabel = LEAVE_TYPE_LABEL[leave.leaveType] ?? 'Nghỉ phép';
+        credit = 0;
+      } else if (r.checkInTime) {
+        const cin = new Date(r.checkInTime);
+        const mins = cin.getHours() * 60 + cin.getMinutes();
+        const delta = mins - LATE_AFTER_MINUTES;
+        if (delta > 0) {
+          checkInHint = `Muộn ${delta} phút`;
+          statusLabel = 'Đi muộn';
+        } else {
+          checkInHint =
+            delta < 0 ? `Sớm ${Math.abs(delta)} phút` : 'Đúng giờ';
+          statusLabel = 'Đúng giờ';
+        }
+        if (r.checkOutTime) {
+          const cout = new Date(r.checkOutTime);
+          const worked = Math.max(
+            0,
+            Math.round((cout.getTime() - cin.getTime()) / 60000),
+          );
+          const h = Math.floor(worked / 60);
+          const m = worked % 60;
+          checkOutHint = `Đủ ${h}h ${m}m`;
+          credit = worked >= 4 * 60 ? (worked >= 7.5 * 60 ? 1 : 0.5) : 0.25;
+          statusLabel =
+            r.status === 'COMPLETED' ? statusLabel : 'Đang làm';
+        } else {
+          statusLabel = 'Đang làm';
+          credit = 0.5;
+        }
+      }
+      return {
+        id: r.id,
+        workDate: dateKey,
+        checkInTime: this.fmtClock(r.checkInTime),
+        checkOutTime: this.fmtClock(r.checkOutTime),
+        checkInHint,
+        checkOutHint,
+        checkInPhotoKey: r.checkInPhotoKey,
+        checkOutPhotoKey: r.checkOutPhotoKey,
+        status: r.status,
+        statusLabel,
+        credit,
+        flagged: r.flagged,
+        leaveCode: leave?.leaveCode ?? null,
+        onLeave: Boolean(leave),
+      };
+    };
+
     return {
       ...row,
+      departmentCode: dept?.departmentCode ?? row.departmentCode ?? null,
+      departmentLocation: dept?.location ?? null,
       nationalIdMasked: this.maskNationalId(emp.nationalId),
       nationalId: canSeeNationalId ? emp.nationalId : undefined,
       seniority: this.seniorityLabel(emp.hireDate),
+      yearsOfService: this.yearsOfService(emp.hireDate),
+      projects,
+      attendanceToday: todayRow
+        ? {
+            id: todayRow.id,
+            workDate: todayRow.workDate,
+            status: todayRow.status,
+            checkInTime: this.fmtClock(todayRow.checkInTime),
+            checkOutTime: this.fmtClock(todayRow.checkOutTime),
+            present: Boolean(todayRow.checkInTime),
+            hasPhoto: Boolean(todayRow.checkInPhotoKey),
+          }
+        : {
+            id: null,
+            workDate: today,
+            status: null,
+            checkInTime: null,
+            checkOutTime: null,
+            present: false,
+            hasPhoto: false,
+          },
+      yesterdayCheckout: this.fmtClock(ydayRow?.checkOutTime ?? null),
+      tasks: myTasks.slice(0, 40).map(mapTask),
+      attendanceHistory: att.slice(0, 40).map(mapAttendance),
+      leaveHistory: allLeaves.slice(0, 40).map((l) => {
+        const handover =
+          l.handoverEmployeeId != null
+            ? empNameMap.get(l.handoverEmployeeId)
+            : undefined;
+        const reviewer =
+          l.reviewBy != null ? creatorMap.get(l.reviewBy) : undefined;
+        const reviewerEmp =
+          reviewer?.employeeId != null
+            ? empNameMap.get(reviewer.employeeId)
+            : undefined;
+        return {
+          id: l.id,
+          leaveCode: l.leaveCode || `LP-${l.id}`,
+          leaveType: l.leaveType,
+          leaveTypeLabel: LEAVE_TYPE_LABEL[l.leaveType] ?? String(l.leaveType),
+          startDate: l.startDate,
+          endDate: l.endDate,
+          daysCount: l.daysCount ?? this.daySpan(l.startDate, l.endDate),
+          status: l.status,
+          reason: l.reason,
+          attachmentName: l.attachmentName,
+          urgency: l.urgency,
+          handoverName: handover?.fullName ?? null,
+          handoverPosition: handover?.position ?? null,
+          reviewerName:
+            reviewerEmp?.fullName || reviewer?.username || null,
+          reviewedAt: l.reviewedAt,
+        };
+      }),
+      recentLeave: lastApproved
+        ? {
+            id: lastApproved.id,
+            leaveTypeLabel:
+              LEAVE_TYPE_LABEL[lastApproved.leaveType] ??
+              String(lastApproved.leaveType),
+            daysCount:
+              lastApproved.daysCount ??
+              this.daySpan(lastApproved.startDate, lastApproved.endDate),
+            startDate: lastApproved.startDate,
+            endDate: lastApproved.endDate,
+            status: lastApproved.status,
+          }
+        : null,
       metrics: {
         year: y,
         month: m + 1,
@@ -414,7 +823,11 @@ export class EmployeesService {
           expectedDays > 0
             ? Math.round((attendedDays / expectedDays) * 1000) / 10
             : 0,
+        attendanceOnTime: onTimeMonth,
+        attendanceValid: monthAtt.length,
         taskTotal,
+        taskDone,
+        taskRunning,
         taskProgressPct: avgProgress,
         leaveUsed: usedLeave,
         leaveQuota: ANNUAL_LEAVE_DAYS,
@@ -423,6 +836,8 @@ export class EmployeesService {
           ANNUAL_LEAVE_DAYS > 0
             ? Math.round((leaveRemaining / ANNUAL_LEAVE_DAYS) * 1000) / 10
             : 0,
+        monthHoursEstimate: attendedDays * 8,
+        monthHoursTarget: expectedDays * 8,
       },
     };
   }
@@ -561,7 +976,8 @@ export class EmployeesService {
         emp.managerEmployeeId = dto.managerEmployeeId;
       }
       if (dto.status !== undefined) emp.status = dto.status;
-      if (dto.departmentId !== undefined) {
+      // Manager: khóa đổi phòng ban (theo UI mẫu); Admin vẫn đổi được
+      if (dto.departmentId !== undefined && user.role !== UserRole.MANAGER) {
         if (dto.departmentId != null) {
           const dept = await this.deptRepo.findOne({
             where: { id: dto.departmentId },

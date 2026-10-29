@@ -9,7 +9,7 @@ import { createReadStream, existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { Repository } from 'typeorm';
 import { v4 as uuidv4 } from 'uuid';
-import { AttendanceStatus, UserRole } from '../common/enums';
+import { AttendanceStatus, EmployeeStatus, UserRole } from '../common/enums';
 import { Department } from '../departments/department.entity';
 import { Employee } from '../employees/employee.entity';
 import { SystemLogsService } from '../system-logs/system-logs.service';
@@ -69,6 +69,29 @@ export class AttendanceService {
     ) {
       throw new ForbiddenException();
     }
+  }
+
+  private async scopedActiveHeadcount(user: AuthUser): Promise<number> {
+    const emps = await this.empRepo.find();
+    const active = (e: Employee) => e.status === EmployeeStatus.ACTIVE;
+    if (user.role === UserRole.EMPLOYEE) {
+      if (!user.employeeId) return 0;
+      const self = emps.find((e) => e.id === user.employeeId);
+      return self && active(self) ? 1 : 0;
+    }
+    if (user.role === UserRole.MANAGER) {
+      const depts = await this.deptRepo.find({
+        where: { managerEmployeeId: user.employeeId ?? undefined },
+      });
+      const deptIds = depts.map((d) => d.id);
+      return emps.filter(
+        (e) =>
+          active(e) &&
+          (e.id === user.employeeId ||
+            (e.departmentId != null && deptIds.includes(e.departmentId))),
+      ).length;
+    }
+    return emps.filter(active).length;
   }
 
   private async scopedList(user: AuthUser) {
@@ -202,18 +225,41 @@ export class AttendanceService {
       withIn.length > 0
         ? Math.round((onTime / withIn.length) * 1000) / 10
         : null;
+    const flaggedToday = dayRows.filter((r) => r.flagged).length;
     const flagged = rows.filter((r) => r.flagged).length;
+    const present = withIn.length;
+    let headcount = await this.scopedActiveHeadcount(user);
+    if (headcount === 0) {
+      headcount = new Set(dayRows.map((r) => r.employeeId)).size;
+    }
+    const presentRate =
+      headcount > 0
+        ? Math.round((present / headcount) * 1000) / 10
+        : null;
+    const inProgress = dayRows.filter(
+      (r) => r.status === AttendanceStatus.IN_PROGRESS,
+    ).length;
+    const completed = dayRows.filter(
+      (r) => r.status === AttendanceStatus.COMPLETED,
+    ).length;
+    const anomalies = dayRows.filter(
+      (r) => r.punctuality === 'LATE' || r.flagged,
+    ).length;
     return {
       date: day,
       total: dayRows.length,
+      headcount,
+      present,
+      presentRate,
       onTime,
       late,
       onTimeRate,
-      inProgress: dayRows.filter((r) => r.status === AttendanceStatus.IN_PROGRESS)
-        .length,
-      completed: dayRows.filter((r) => r.status === AttendanceStatus.COMPLETED)
-        .length,
+      inProgress,
+      completed,
+      anomalies,
+      needReview: anomalies,
       flagged,
+      flaggedToday,
       allTimeTotal: rows.length,
     };
   }
@@ -224,9 +270,11 @@ export class AttendanceService {
       q?: string;
       date?: string;
       punctuality?: string;
+      status?: string;
       departmentId?: number;
       employeeId?: number;
       flagged?: string;
+      anomalies?: string;
       page?: number;
       pageSize?: number;
     } = {},
@@ -248,6 +296,14 @@ export class AttendanceService {
       rows = rows.filter((r) => r.punctuality === 'LATE');
     } else if (query.punctuality === 'IN_PROGRESS') {
       rows = rows.filter((r) => r.status === AttendanceStatus.IN_PROGRESS);
+    }
+    if (query.status === AttendanceStatus.COMPLETED) {
+      rows = rows.filter((r) => r.status === AttendanceStatus.COMPLETED);
+    } else if (query.status === AttendanceStatus.IN_PROGRESS) {
+      rows = rows.filter((r) => r.status === AttendanceStatus.IN_PROGRESS);
+    }
+    if (query.anomalies === '1' || query.anomalies === 'true') {
+      rows = rows.filter((r) => r.punctuality === 'LATE' || r.flagged);
     }
     if (query.flagged === '1' || query.flagged === 'true') {
       rows = rows.filter((r) => r.flagged);

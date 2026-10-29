@@ -1,0 +1,248 @@
+.nx-account-head {
+  margin-bottom: 1.25rem;
+}
+
+.nx-account-head h1 {
+  margin: 0;
+  font-size: 1.55rem;
+  font-weight: 800;
+  color: var(--nx-ink-deep);
+}
+
+.nx-account-head p {
+  margin: 0.35rem 0 0;
+  color: var(--nx-muted);
+  font-size: 0.92rem;
+}
+
+.nx-account-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.nx-account-card {
+  background: #fff;
+  border: 1px solid var(--nx-line);
+  border-radius: 16px;
+  padding: 1.15rem 1.25rem;
+  box-shadow: 0 1px 2px rgba(11, 46, 40, 0.04);
+}
+
+.nx-account-card h3 {
+  margin: 0 0 0.85rem;
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--nx-ink-deep);
+}
+
+.nx-account-hero {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1.25rem;
+}
+
+.nx-account-avatar {
+  width: 72px;
+  height: 72px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #0d5c4d, #1a9b82);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 1.35rem;
+}
+
+.nx-account-hero h2 {
+  margin: 0 0 0.35rem;
+  font-size: 1.35rem;
+  font-weight: 800;
+}
+
+.nx-account-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.35rem;
+}
+
+.nx-account-badges .role,
+.nx-account-badges .status {
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+}
+
+.nx-account-badges .role.admin {
+  background: #eef2ff;
+  color: #3730a3;
+}
+
+.nx-account-badges .role.manager {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.nx-account-badges .role.employee {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.nx-account-badges .status.on {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.nx-account-badges .status.off {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.nx-account-hero .handle {
+  margin: 0;
+  color: var(--nx-muted);
+  font-size: 0.88rem;
+}
+
+.nx-account-scope {
+  margin-left: auto;
+  text-align: right;
+  min-width: 140px;
+}
+
+.nx-account-scope span {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--nx-muted);
+  font-weight: 600;
+}
+
+.nx-account-scope strong {
+  font-size: 2rem;
+  font-weight: 800;
+  color: var(--nx-ink-deep);
+  line-height: 1.1;
+}
+
+.nx-account-scope small {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--nx-muted);
+}
+
+.nx-account-dl {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0;
+}
+
+.nx-account-dl div {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+.nx-account-dl dt {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--nx-muted);
+}
+
+.nx-account-dl dd {
+  margin: 0;
+  font-weight: 600;
+  color: var(--nx-ink);
+}
+
+.nx-account-pw-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.nx-account-pw-form label {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--nx-ink);
+}
+
+.nx-account-pw-form input {
+  border: 1px solid var(--nx-line);
+  border-radius: 10px;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.92rem;
+}
+
+.nx-account-note {
+  font-size: 0.82rem;
+  color: var(--nx-muted);
+  margin: 0 0 0.85rem;
+}
+
+.nx-session-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+  border-radius: 12px;
+  border: 1px solid var(--nx-line);
+  background: #f8faf9;
+  margin-bottom: 0.75rem;
+}
+
+.nx-session-card strong {
+  display: block;
+  font-size: 0.92rem;
+}
+
+.nx-session-card span {
+  font-size: 0.8rem;
+  color: var(--nx-muted);
+}
+
+.nx-session-card .pill {
+  font-size: 0.68rem;
+  font-weight: 800;
+  padding: 0.25rem 0.5rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.nx-session-card .pill.on {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.nx-session-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.nx-btn-outline.danger {
+  border-color: #fecaca;
+  color: #b91c1c;
+}
+
+.nx-btn-outline.danger:hover {
+  background: #fef2f2;
+}
+
+@media (max-width: 900px) {
+  .nx-account-grid {
+    grid-template-columns: 1fr;
+  }
+  .nx-account-scope {
+    margin-left: 0;
+    text-align: left;
+  }
+}

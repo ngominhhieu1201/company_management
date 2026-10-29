@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Modal, Spinner } from 'react-bootstrap';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useCallback, useEffect, useState } from 'react';
+import { Alert, Spinner } from 'react-bootstrap';
+import { Link, useParams } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
 import '../styles/employee-detail.css';
@@ -16,6 +16,53 @@ type Account =
     }
   | { linked: false };
 
+type TaskRow = {
+  id: number;
+  taskCode?: string;
+  title: string;
+  status: string;
+  priority: string;
+  progress: number;
+  startDate?: string | null;
+  dueDate: string | null;
+  projectName: string | null;
+  createdByName?: string;
+};
+
+type AttRow = {
+  id: number;
+  workDate: string;
+  checkInTime: string | null;
+  checkOutTime: string | null;
+  checkInHint?: string | null;
+  checkOutHint?: string | null;
+  checkInPhotoKey?: string | null;
+  checkOutPhotoKey?: string | null;
+  status: string;
+  statusLabel?: string;
+  credit?: number;
+  flagged: boolean;
+  onLeave?: boolean;
+  leaveCode?: string | null;
+};
+
+type LeaveRow = {
+  id: number;
+  leaveCode?: string;
+  leaveType?: string;
+  leaveTypeLabel: string;
+  startDate: string;
+  endDate: string;
+  daysCount: number;
+  status: string;
+  reason: string | null;
+  attachmentName?: string | null;
+  handoverName?: string | null;
+  handoverPosition?: string | null;
+  reviewerName?: string | null;
+  reviewedAt?: string | null;
+};
+
 type Detail = {
   id: number;
   employeeCode: string;
@@ -24,6 +71,8 @@ type Detail = {
   phone: string;
   departmentId: number | null;
   departmentName: string | null;
+  departmentCode: string | null;
+  departmentLocation: string | null;
   position: string;
   hireDate: string | null;
   dateOfBirth: string | null;
@@ -38,46 +87,93 @@ type Detail = {
   photoKey: string | null;
   status: string;
   seniority: string | null;
+  yearsOfService: number | null;
+  projects: string[];
   account: Account;
+  todayPresence?: { kind: string; label: string };
+  attendanceToday: {
+    id: number | null;
+    checkInTime: string | null;
+    checkOutTime: string | null;
+    present: boolean;
+    hasPhoto: boolean;
+    status: string | null;
+  };
+  yesterdayCheckout: string | null;
+  tasks: TaskRow[];
+  attendanceHistory: AttRow[];
+  leaveHistory: LeaveRow[];
+  recentLeave: {
+    id: number;
+    leaveTypeLabel: string;
+    daysCount: number;
+    startDate: string;
+    endDate: string;
+    status: string;
+  } | null;
   metrics: {
     label: string;
     attendanceDays: number;
     attendanceExpected: number;
     attendancePct: number;
+    attendanceOnTime: number;
+    attendanceValid: number;
     taskTotal: number;
+    taskDone: number;
+    taskRunning: number;
     taskProgressPct: number;
     leaveUsed: number;
     leaveQuota: number;
     leaveRemaining: number;
     leaveRemainingPct: number;
+    monthHoursEstimate: number;
+    monthHoursTarget: number;
   };
 };
 
-type AuditRow = {
-  id: number;
-  createdAt: string;
-  action: string;
-  actorUsername: string;
-  metadata: Record<string, unknown> | null;
-};
+function weekdayVi(iso: string) {
+  const days = [
+    'Chủ nhật',
+    'Thứ hai',
+    'Thứ ba',
+    'Thứ tư',
+    'Thứ năm',
+    'Thứ sáu',
+    'Thứ bảy',
+  ];
+  const d = new Date(iso + 'T00:00:00');
+  if (Number.isNaN(d.getTime())) return '';
+  const today = new Date().toISOString().slice(0, 10);
+  const prefix = iso === today ? 'Hôm nay — ' : '';
+  return `${prefix}${days[d.getDay()]}`;
+}
 
-type Dept = { id: number; name: string };
-type EmpOpt = { id: number; fullName: string; employeeCode: string; position?: string };
+function priShort(p: string) {
+  if (p === 'URGENT') return 'P0 · Khẩn';
+  if (p === 'HIGH') return 'P1 · Cao';
+  if (p === 'LOW') return 'P3 · Thấp';
+  return 'P2 · TB';
+}
 
-type FormState = {
-  fullName: string;
-  dateOfBirth: string;
-  gender: string;
-  nationalId: string;
-  email: string;
-  phone: string;
-  departmentId: string;
-  position: string;
-  managerEmployeeId: string;
-  contractType: string;
-  permanentAddress: string;
-  temporaryAddress: string;
-};
+function leaveStatusLabel(s: string) {
+  if (s === 'APPROVED') return 'ĐÃ DUYỆT';
+  if (s === 'PENDING') return 'CHỜ DUYỆT';
+  if (s === 'REJECTED') return 'TỪ CHỐI';
+  if (s === 'CANCELLED') return 'ĐÃ HỦY';
+  return s;
+}
+
+function dueHint(due: string | null) {
+  if (!due) return null;
+  const today = new Date().toISOString().slice(0, 10);
+  const a = new Date(today + 'T00:00:00').getTime();
+  const b = new Date(due + 'T00:00:00').getTime();
+  const diff = Math.round((b - a) / 86400000);
+  if (diff === 0) return 'Hôm nay';
+  if (diff > 0 && diff <= 7) return `Còn ${diff} ngày`;
+  if (diff < 0) return `Quá ${Math.abs(diff)} ngày`;
+  return null;
+}
 
 function initials(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -88,25 +184,16 @@ function initials(name: string) {
 
 function fmtDate(iso: string | null | undefined) {
   if (!iso) return '—';
-  const d = new Date(iso);
-  if (!Number.isNaN(d.getTime()) && iso.includes('T')) {
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  }
   const [y, m, day] = iso.slice(0, 10).split('-');
   if (!y || !m || !day) return iso;
   return `${day}/${m}/${y}`;
 }
 
-function actionLabel(action: string) {
-  const map: Record<string, string> = {
-    EMPLOYEE_CREATE: 'Tiếp nhận mới',
-    EMPLOYEE_UPDATE: 'Cập nhật hồ sơ',
-    EMPLOYEE_STATUS_CHANGE: 'Đổi trạng thái',
-    EMPLOYEE_POSITION_CHANGE: 'Bổ nhiệm / đổi chức vụ',
-    EMPLOYEE_PHOTO_UPLOAD: 'Cập nhật ảnh',
-  };
-  return map[action] || action;
+function genderLabel(g: string | null) {
+  if (g === 'MALE') return 'Nam';
+  if (g === 'FEMALE') return 'Nữ';
+  if (g === 'OTHER') return 'Khác';
+  return '—';
 }
 
 function contractLabel(c: string | null) {
@@ -117,47 +204,46 @@ function contractLabel(c: string | null) {
   return c || '—';
 }
 
-function statusBadge(status: string) {
-  if (status === 'ACTIVE') return { cls: 'on', text: 'ĐANG LÀM VIỆC' };
-  if (status === 'SUSPENDED') return { cls: 'warn', text: 'TẠM NGƯNG' };
-  return { cls: 'off', text: 'ĐÃ NGHỈ VIỆC' };
+function statusTask(s: string) {
+  if (s === 'DONE') return 'DONE';
+  if (s === 'IN_PROGRESS') return 'IN_PROGRESS';
+  if (s === 'REVIEW') return 'REVIEW';
+  return 'TODO';
 }
 
-function toForm(d: Detail): FormState {
-  return {
-    fullName: d.fullName || '',
-    dateOfBirth: d.dateOfBirth?.slice(0, 10) || '',
-    gender: d.gender || 'MALE',
-    nationalId: d.nationalId || '',
-    email: d.email || '',
-    phone: d.phone || '',
-    departmentId: d.departmentId ? String(d.departmentId) : '',
-    position: d.position || '',
-    managerEmployeeId: d.managerEmployeeId ? String(d.managerEmployeeId) : '',
-    contractType: d.contractType || 'OFFICIAL',
-    permanentAddress: d.permanentAddress || '',
-    temporaryAddress: d.temporaryAddress || '',
-  };
+function exportProfile(d: Detail) {
+  const lines = [
+    `Họ tên,${d.fullName}`,
+    `Mã NV,${d.employeeCode}`,
+    `Email,${d.email}`,
+    `Điện thoại,${d.phone}`,
+    `Phòng ban,${d.departmentName || ''}`,
+    `Chức danh,${d.position}`,
+    `Ngày vào,${d.hireDate || ''}`,
+    `Hợp đồng,${d.contractType || ''}`,
+    `Quản lý,${d.managerName || ''}`,
+  ];
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `hoso-${d.employeeCode}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
+
+type Tab = 'info' | 'tasks' | 'attendance' | 'leave';
 
 export default function EmployeeDetailPage() {
   const { id } = useParams();
-  const navigate = useNavigate();
   const { user } = useAuth();
   const canManage = user?.role === 'ADMIN' || user?.role === 'MANAGER';
-  const canAdmin = user?.role === 'ADMIN';
+  const isManager = user?.role === 'MANAGER';
 
   const [detail, setDetail] = useState<Detail | null>(null);
-  const [audit, setAudit] = useState<AuditRow[]>([]);
-  const [depts, setDepts] = useState<Dept[]>([]);
-  const [managers, setManagers] = useState<EmpOpt[]>([]);
-  const [form, setForm] = useState<FormState | null>(null);
-  const [showId, setShowId] = useState(false);
+  const [tab, setTab] = useState<Tab>('info');
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [okMsg, setOkMsg] = useState('');
-  const [tempPass, setTempPass] = useState<string | null>(null);
 
   const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 
@@ -165,13 +251,8 @@ export default function EmployeeDetailPage() {
     if (!id) return;
     setLoading(true);
     try {
-      const [d, a] = await Promise.all([
-        api.get(`/employees/${id}`),
-        api.get(`/employees/${id}/audit`, { params: { limit: 40 } }),
-      ]);
-      setDetail(d.data);
-      setForm(toForm(d.data));
-      setAudit(a.data);
+      const { data } = await api.get(`/employees/${id}`);
+      setDetail(data);
       setError('');
     } catch {
       setError('Không tải được hồ sơ nhân sự');
@@ -183,105 +264,7 @@ export default function EmployeeDetailPage() {
 
   useEffect(() => {
     void load();
-    api.get('/departments').then((r) => setDepts(r.data)).catch(() => undefined);
-    api
-      .get('/employees/options')
-      .then((r) => setManagers(r.data))
-      .catch(() => undefined);
   }, [load]);
-
-  const dirty = useMemo(() => {
-    if (!detail || !form) return false;
-    const base = toForm(detail);
-    return JSON.stringify(base) !== JSON.stringify(form);
-  }, [detail, form]);
-
-  const badge = detail ? statusBadge(detail.status) : null;
-
-  function setField<K extends keyof FormState>(key: K, value: FormState[K]) {
-    setForm((prev) => (prev ? { ...prev, [key]: value } : prev));
-  }
-
-  async function saveProfile() {
-    if (!detail || !form) return;
-    if (!form.email.trim() || !form.phone.trim()) {
-      setError('Email và SĐT là bắt buộc');
-      return;
-    }
-    if (canManage && !form.fullName.trim()) {
-      setError('Họ tên là bắt buộc');
-      return;
-    }
-    setSaving(true);
-    try {
-      if (canManage) {
-        await api.patch(`/employees/${detail.id}`, {
-          fullName: form.fullName.trim(),
-          email: form.email.trim(),
-          phone: form.phone.trim(),
-          dateOfBirth: form.dateOfBirth || null,
-          gender: form.gender || null,
-          nationalId: form.nationalId.trim() || null,
-          departmentId: form.departmentId ? Number(form.departmentId) : null,
-          position: form.position.trim(),
-          managerEmployeeId: form.managerEmployeeId
-            ? Number(form.managerEmployeeId)
-            : null,
-          contractType: form.contractType || null,
-          permanentAddress: form.permanentAddress.trim() || null,
-          temporaryAddress: form.temporaryAddress.trim() || null,
-        });
-      } else {
-        await api.patch(`/employees/${detail.id}`, {
-          email: form.email.trim(),
-          phone: form.phone.trim(),
-          temporaryAddress: form.temporaryAddress.trim() || null,
-        });
-      }
-      setOkMsg('Đã cập nhật hồ sơ nhân sự');
-      await load();
-    } catch {
-      setError('Cập nhật hồ sơ thất bại');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function setStatus(status: 'ACTIVE' | 'SUSPENDED' | 'INACTIVE') {
-    if (!detail || !canManage) return;
-    setSaving(true);
-    try {
-      await api.patch(`/employees/${detail.id}`, { status });
-      setOkMsg(
-        status === 'ACTIVE'
-          ? 'Đã kích hoạt lại'
-          : status === 'SUSPENDED'
-            ? 'Đã tạm ngưng công tác'
-            : 'Đã chuyển trạng thái nghỉ việc',
-      );
-      await load();
-    } catch {
-      setError('Cập nhật trạng thái thất bại');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function resetPassword() {
-    if (!detail?.account.linked || !canAdmin) return;
-    setSaving(true);
-    try {
-      const { data } = await api.post(
-        `/users/${detail.account.id}/reset-password`,
-      );
-      setTempPass(data.temporaryPassword);
-      setOkMsg('Đã tạo mật khẩu tạm');
-    } catch {
-      setError('Đặt lại mật khẩu thất bại');
-    } finally {
-      setSaving(false);
-    }
-  }
 
   if (loading) {
     return (
@@ -291,10 +274,11 @@ export default function EmployeeDetailPage() {
     );
   }
 
-  if (!detail || !form) {
+  if (!detail) {
     return (
       <Alert variant="danger">
-        {error || 'Không tìm thấy nhân sự'} <Link to="/employees">Quay lại</Link>
+        {error || 'Không tìm thấy nhân sự'}{' '}
+        <Link to="/employees">Quay lại</Link>
       </Alert>
     );
   }
@@ -302,25 +286,48 @@ export default function EmployeeDetailPage() {
   const photoUrl = detail.photoKey
     ? `${apiBase}/employees/photo/${detail.photoKey}`
     : null;
+  const accActive = detail.account.linked && !detail.account.locked;
+  const m = detail.metrics;
 
   return (
-    <div className="nx-ed">
+    <div className="nx-ed nx-ed-view">
       <div className="nx-ed-top">
         <div>
           <nav className="nx-ed-crumb">
-            <span>Quản trị hệ thống</span>
+            <span>{isManager ? 'Quản trị quản lý' : 'Quản trị hệ thống'}</span>
             <span className="sep">›</span>
-            <Link to="/employees">Quản lý nhân sự</Link>
+            <span>Phân hệ nhân sự</span>
             <span className="sep">›</span>
-            <span className="here">
-              Chi tiết: {detail.employeeCode} ({detail.fullName})
-            </span>
+            <Link to="/employees">Danh sách nhân viên</Link>
+            <span className="sep">›</span>
+            <span className="here">{detail.employeeCode}</span>
           </nav>
-          <h1>Hồ Sơ Nhân Sự Chi Tiết &amp; Cập Nhật</h1>
         </div>
-        <Link to="/employees" className="nx-btn-outline">
-          Quay lại danh sách
-        </Link>
+        <div className="nx-ed-actions">
+          <button
+            type="button"
+            className="nx-btn-outline"
+            onClick={() => exportProfile(detail)}
+          >
+            Xuất sơ yếu lý lịch
+          </button>
+          {canManage && (
+            <Link
+              to={`/employees/${detail.id}/edit`}
+              className="nx-btn-primary"
+            >
+              Chỉnh sửa thông tin
+            </Link>
+          )}
+          {!canManage && user?.employeeId === detail.id && (
+            <Link
+              to={`/employees/${detail.id}/edit`}
+              className="nx-btn-primary"
+            >
+              Cập nhật thông tin liên hệ
+            </Link>
+          )}
+        </div>
       </div>
 
       {error && (
@@ -328,441 +335,585 @@ export default function EmployeeDetailPage() {
           {error}
         </Alert>
       )}
-      {okMsg && (
-        <Alert variant="success" dismissible onClose={() => setOkMsg('')}>
-          {okMsg}
-        </Alert>
-      )}
 
-      <div className="nx-ed-grid">
-        <aside>
-          <div className="nx-ed-card nx-ed-profile">
-            <div className="nx-ed-avatar">
-              {photoUrl ? (
-                <img src={photoUrl} alt={detail.fullName} />
-              ) : (
-                initials(detail.fullName)
+      <section className="nx-ed-hero">
+        <div className="nx-ed-hero-main">
+          <div className="nx-ed-avatar lg">
+            {photoUrl ? (
+              <img src={photoUrl} alt={detail.fullName} />
+            ) : (
+              initials(detail.fullName)
+            )}
+          </div>
+          <div>
+            <div className="nx-ed-hero-name">
+              <h1>{detail.fullName}</h1>
+              <span className="nx-ed-code">{detail.employeeCode}</span>
+              {detail.account.linked && (
+                <span
+                  className={`nx-ed-acc ${accActive ? 'on' : 'off'}`}
+                >
+                  TÀI KHOẢN: {accActive ? 'ACTIVE' : 'LOCKED'}
+                </span>
               )}
             </div>
-            {badge && <span className={`nx-ed-badge ${badge.cls}`}>{badge.text}</span>}
-            <h2>{detail.fullName}</h2>
-            <p className="sub">
-              {detail.employeeCode} · {detail.position || '—'}
+            <p className="nx-ed-hero-role">
+              {detail.position || '—'}
+              {detail.departmentName && (
+                <>
+                  {' · '}
+                  {detail.departmentName}
+                  {detail.departmentCode
+                    ? ` (${detail.departmentCode})`
+                    : ''}
+                </>
+              )}
             </p>
-            <div className="nx-ed-quick">
-              <div>
-                <span>Phòng ban</span>
-                <strong>{detail.departmentName || '—'}</strong>
-              </div>
-              <div>
-                <span>Email</span>
-                <strong>{detail.email || '—'}</strong>
-              </div>
-              <div>
-                <span>Điện thoại</span>
-                <strong>{detail.phone || '—'}</strong>
-              </div>
-              <div>
-                <span>Ngày vào làm</span>
-                <strong>{fmtDate(detail.hireDate)}</strong>
-              </div>
-              <div>
-                <span>Thâm niên</span>
-                <strong>{detail.seniority || '—'}</strong>
-              </div>
+            <div className="nx-ed-hero-meta">
+              <span>{detail.email || '—'}</span>
+              <span>{detail.phone || '—'}</span>
+              <span>
+                Vào làm {fmtDate(detail.hireDate)}
+                {detail.yearsOfService != null
+                  ? ` · ${detail.yearsOfService} năm thâm niên`
+                  : ''}
+              </span>
             </div>
           </div>
+        </div>
+        <div className="nx-ed-hero-kpis">
+          <div className="nx-ed-hk">
+            <div className="v">{m.taskTotal} tasks</div>
+            <div className="l">
+              {m.taskDone} hoàn thành · {m.taskRunning} đang chạy
+            </div>
+          </div>
+          <div className="nx-ed-hk">
+            <div className="v">{m.attendancePct}%</div>
+            <div className="l">
+              Đúng giờ {m.attendanceOnTime}/{m.attendanceValid} ca hợp lệ
+            </div>
+          </div>
+          <div className="nx-ed-hk">
+            <div className="v">
+              {m.leaveRemaining} / {m.leaveQuota} ngày
+            </div>
+            <div className="l">Đã dùng {m.leaveUsed} ngày phép năm</div>
+          </div>
+        </div>
+      </section>
 
-          {canManage && (
-            <div className="nx-ed-card nx-ed-ops">
-              <h3>Vận hành &amp; trạng thái</h3>
-              <div className="row">
-                <span>Trạng thái hồ sơ</span>
-                {badge && (
-                  <span className={`nx-ed-badge ${badge.cls}`}>{badge.text}</span>
-                )}
-              </div>
-              <div className="actions">
-                {detail.status !== 'SUSPENDED' && (
-                  <button
-                    type="button"
-                    className="nx-ed-btn-warn"
-                    disabled={saving}
-                    onClick={() => void setStatus('SUSPENDED')}
+      <div className="nx-ed-tabs">
+        {(
+          [
+            ['info', `Thông tin cá nhân`],
+            ['tasks', `Lịch sử công việc (${m.taskTotal})`],
+            ['attendance', `Lịch sử chấm công (${detail.attendanceHistory.length})`],
+            ['leave', `Lịch sử nghỉ phép (${detail.leaveHistory.length})`],
+          ] as const
+        ).map(([k, label]) => (
+          <button
+            key={k}
+            type="button"
+            className={tab === k ? 'on' : undefined}
+            onClick={() => setTab(k)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div className={`nx-ed-body${tab !== 'info' ? ' full' : ''}`}>
+        <div className="nx-ed-main">
+          {tab === 'info' && (
+            <div className="nx-ed-info-grid">
+              <section className="nx-ed-card">
+                <h2>Thông tin nhân thân</h2>
+                <dl className="nx-ed-dl">
+                  <div>
+                    <dt>Họ và tên</dt>
+                    <dd>{detail.fullName}</dd>
+                  </div>
+                  <div>
+                    <dt>Giới tính</dt>
+                    <dd>{genderLabel(detail.gender)}</dd>
+                  </div>
+                  <div>
+                    <dt>Ngày sinh</dt>
+                    <dd>{fmtDate(detail.dateOfBirth)}</dd>
+                  </div>
+                  <div>
+                    <dt>CCCD / Định danh</dt>
+                    <dd>{detail.nationalIdMasked || '—'}</dd>
+                  </div>
+                  <div className="full">
+                    <dt>Địa chỉ thường trú</dt>
+                    <dd>{detail.permanentAddress || '—'}</dd>
+                  </div>
+                  <div className="full">
+                    <dt>Địa chỉ tạm trú</dt>
+                    <dd>{detail.temporaryAddress || '—'}</dd>
+                  </div>
+                </dl>
+              </section>
+              <section className="nx-ed-card">
+                <h2>Tổ chức &amp; hợp đồng</h2>
+                <dl className="nx-ed-dl">
+                  <div>
+                    <dt>Phòng ban</dt>
+                    <dd>
+                      {detail.departmentName || '—'}
+                      {detail.departmentCode
+                        ? ` (${detail.departmentCode})`
+                        : ''}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Chức danh</dt>
+                    <dd>{detail.position || '—'}</dd>
+                  </div>
+                  <div>
+                    <dt>Quản lý trực tiếp</dt>
+                    <dd>{detail.managerName || '—'}</dd>
+                  </div>
+                  <div>
+                    <dt>Loại hợp đồng</dt>
+                    <dd>{contractLabel(detail.contractType)}</dd>
+                  </div>
+                  <div>
+                    <dt>Ngày bắt đầu</dt>
+                    <dd>{fmtDate(detail.hireDate)}</dd>
+                  </div>
+                  <div>
+                    <dt>Địa điểm làm việc</dt>
+                    <dd>{detail.departmentLocation || '—'}</dd>
+                  </div>
+                </dl>
+              </section>
+              {detail.tasks.length > 0 && (
+                <section className="nx-ed-card full">
+                  <h2>Công việc gần đây</h2>
+                  <ul className="nx-ed-tasklist">
+                    {detail.tasks.slice(0, 4).map((t) => (
+                      <li key={t.id}>
+                        <Link to={`/tasks/${t.id}`}>{t.title}</Link>
+                        <div className="nx-progress">
+                          <div className="nx-progress-bar">
+                            <span style={{ width: `${t.progress}%` }} />
+                          </div>
+                          <em>{t.progress}%</em>
+                        </div>
+                        <span className={`nx-ed-st ${statusTask(t.status)}`}>
+                          {t.status}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  <Link
+                    className="nx-ed-more"
+                    to={`/tasks?assigneeId=${detail.id}`}
                   >
-                    Tạm ngưng công tác
-                  </button>
-                )}
-                {detail.status !== 'INACTIVE' && (
-                  <button
-                    type="button"
-                    className="nx-ed-btn-danger"
-                    disabled={saving}
-                    onClick={() => void setStatus('INACTIVE')}
-                  >
-                    Ngừng hoạt động / Nghỉ việc
-                  </button>
-                )}
-                {detail.status !== 'ACTIVE' && (
-                  <button
-                    type="button"
-                    className="nx-ed-btn-ok"
-                    disabled={saving}
-                    onClick={() => void setStatus('ACTIVE')}
-                  >
-                    Kích hoạt lại (ACTIVE)
-                  </button>
-                )}
-              </div>
+                    Xem toàn bộ {m.taskTotal} task của nhân sự trên Kanban
+                  </Link>
+                </section>
+              )}
             </div>
           )}
 
-          <div className="nx-ed-card">
-            <h3>Chỉ số vận hành tháng này — {detail.metrics.label}</h3>
-            <div className="nx-ed-metrics">
-              <div className="nx-ed-metric">
-                <span>Chấm công</span>
-                <strong>
-                  {detail.metrics.attendanceDays}/
-                  {detail.metrics.attendanceExpected} ngày (
-                  {detail.metrics.attendancePct}%)
-                </strong>
-                <div className="bar">
-                  <i style={{ width: `${Math.min(100, detail.metrics.attendancePct)}%` }} />
+          {tab === 'tasks' && (
+            <section className="nx-ed-card">
+              <h2>Lịch sử công việc được giao</h2>
+              {detail.tasks.length === 0 ? (
+                <div className="nx-empty">Chưa có công việc được giao.</div>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table className="nx-ed-table nx-ed-rich">
+                    <thead>
+                      <tr>
+                        <th>Mã &amp; tên công việc</th>
+                        <th>Dự án</th>
+                        <th>Ưu tiên</th>
+                        <th>Tiến độ</th>
+                        <th>Thời hạn</th>
+                        <th>Người giao</th>
+                        <th>Trạng thái</th>
+                        <th />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {detail.tasks.map((t) => {
+                        const hint = dueHint(t.dueDate);
+                        return (
+                          <tr key={t.id}>
+                            <td>
+                              <div className="nx-ed-code-title">
+                                <span className="code">
+                                  {t.taskCode || `TSK-${t.id}`}
+                                </span>
+                                <strong>{t.title}</strong>
+                              </div>
+                            </td>
+                            <td>{t.projectName || '—'}</td>
+                            <td>
+                              <span
+                                className={`nx-ed-pri ${
+                                  t.priority === 'URGENT'
+                                    ? 'urgent'
+                                    : t.priority === 'HIGH'
+                                      ? 'high'
+                                      : 'mid'
+                                }`}
+                              >
+                                {priShort(t.priority)}
+                              </span>
+                            </td>
+                            <td>
+                              <div className="nx-progress">
+                                <div className="nx-progress-bar">
+                                  <span style={{ width: `${t.progress}%` }} />
+                                </div>
+                                <em>{t.progress}%</em>
+                              </div>
+                            </td>
+                            <td>
+                              <div className="nx-ed-due">
+                                <strong>{fmtDate(t.dueDate)}</strong>
+                                {hint && <small>{hint}</small>}
+                              </div>
+                            </td>
+                            <td>{t.createdByName || '—'}</td>
+                            <td>
+                              <span className={`nx-ed-st ${statusTask(t.status)}`}>
+                                {t.status}
+                              </span>
+                            </td>
+                            <td>
+                              <Link
+                                to={`/tasks/${t.id}`}
+                                className="nx-ed-more"
+                                style={{ margin: 0 }}
+                              >
+                                Xem
+                              </Link>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <div className="nx-ed-tab-foot">
+                Hiển thị {detail.tasks.length} / {m.taskTotal} công việc
+                <Link to={`/tasks?assigneeId=${detail.id}`}>
+                  Mở trên bảng Kanban
+                </Link>
+              </div>
+            </section>
+          )}
+
+          {tab === 'attendance' && (
+            <section className="nx-ed-card">
+              <div className="nx-ed-sec-head">
+                <h2 style={{ margin: 0 }}>Nhật ký chấm công chi tiết</h2>
+                <div className="nx-ed-legend">
+                  <span>Ca hành chính 08:30–17:30</span>
+                  <span>· Ảnh lưu trên máy chủ</span>
                 </div>
               </div>
-              <div className="nx-ed-metric">
-                <span>Công việc</span>
-                <strong>
-                  {detail.metrics.taskTotal} việc · tiến độ TB{' '}
-                  {detail.metrics.taskProgressPct}%
-                </strong>
-                <div className="bar">
-                  <i
-                    style={{
-                      width: `${Math.min(100, detail.metrics.taskProgressPct)}%`,
-                    }}
-                  />
+              {detail.attendanceHistory.length === 0 ? (
+                <div className="nx-empty">Chưa có bản ghi chấm công.</div>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table className="nx-ed-table nx-ed-rich">
+                    <thead>
+                      <tr>
+                        <th>Ngày chấm công</th>
+                        <th>Ca làm việc</th>
+                        <th>Check-in</th>
+                        <th>Ảnh vào</th>
+                        <th>Check-out</th>
+                        <th>Ảnh ra</th>
+                        <th>Quy đổi công</th>
+                        <th>Trạng thái</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {detail.attendanceHistory.map((r) => (
+                        <tr key={r.id}>
+                          <td>
+                            <Link to={`/attendance/${r.id}`}>
+                              <strong>{fmtDate(r.workDate)}</strong>
+                            </Link>
+                            <div className="muted">{weekdayVi(r.workDate)}</div>
+                          </td>
+                          <td>
+                            {r.onLeave ? (
+                              <span className="muted">
+                                Nghỉ · {r.leaveCode || 'có đơn'}
+                              </span>
+                            ) : (
+                              <>
+                                <strong>Ca hành chính</strong>
+                                <div className="muted">08:30 – 17:30</div>
+                              </>
+                            )}
+                          </td>
+                          <td>
+                            <strong>{r.checkInTime || '—'}</strong>
+                            {r.checkInHint && (
+                              <div className="muted">{r.checkInHint}</div>
+                            )}
+                          </td>
+                          <td>
+                            {r.checkInPhotoKey ? (
+                              <a
+                                className="nx-ed-photo"
+                                href={`${apiBase}/attendance/photo/${r.checkInPhotoKey}`}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                Xem ảnh
+                              </a>
+                            ) : (
+                              '—'
+                            )}
+                          </td>
+                          <td>
+                            <strong>{r.checkOutTime || '—'}</strong>
+                            {r.checkOutHint && (
+                              <div className="muted">{r.checkOutHint}</div>
+                            )}
+                          </td>
+                          <td>
+                            {r.checkOutPhotoKey ? (
+                              <a
+                                className="nx-ed-photo"
+                                href={`${apiBase}/attendance/photo/${r.checkOutPhotoKey}`}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                Xem ảnh
+                              </a>
+                            ) : (
+                              '—'
+                            )}
+                          </td>
+                          <td>
+                            {r.credit != null ? `${r.credit} công` : '—'}
+                          </td>
+                          <td>
+                            <span
+                              className={`nx-ed-st ${
+                                r.onLeave
+                                  ? 'REVIEW'
+                                  : r.statusLabel === 'Đi muộn'
+                                    ? 'TODO'
+                                    : 'DONE'
+                              }`}
+                            >
+                              {r.statusLabel || r.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
+              )}
+              <div className="nx-ed-tab-foot">
+                Hiển thị {detail.attendanceHistory.length} bản ghi gần nhất
+                <Link to="/attendance">Xem toàn bộ chấm công</Link>
               </div>
-              <div className="nx-ed-metric">
-                <span>Phép còn lại (quota năm {detail.metrics.leaveQuota} ngày)</span>
-                <strong>
-                  {detail.metrics.leaveRemaining} / {detail.metrics.leaveQuota}{' '}
-                  ({detail.metrics.leaveRemainingPct}%)
-                </strong>
-                <div className="bar">
-                  <i
-                    style={{
-                      width: `${Math.min(100, detail.metrics.leaveRemainingPct)}%`,
-                    }}
-                  />
+            </section>
+          )}
+
+          {tab === 'leave' && (
+            <section className="nx-ed-card">
+              <h2>Lịch sử nghỉ phép</h2>
+              {detail.leaveHistory.length === 0 ? (
+                <div className="nx-empty">Chưa có đơn nghỉ phép.</div>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table className="nx-ed-table nx-ed-rich">
+                    <thead>
+                      <tr>
+                        <th>Mã đơn &amp; loại</th>
+                        <th>Thời gian nghỉ</th>
+                        <th>Số ngày</th>
+                        <th>Lý do &amp; đính kèm</th>
+                        <th>Bàn giao</th>
+                        <th>Người phê duyệt</th>
+                        <th>Trạng thái</th>
+                        <th />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {detail.leaveHistory.map((l) => (
+                        <tr key={l.id}>
+                          <td>
+                            <div className="nx-ed-code-title">
+                              <span className="code">
+                                #{l.leaveCode || l.id}
+                              </span>
+                              <strong>{l.leaveTypeLabel}</strong>
+                            </div>
+                          </td>
+                          <td>
+                            {fmtDate(l.startDate)}
+                            {l.startDate !== l.endDate
+                              ? ` – ${fmtDate(l.endDate)}`
+                              : ''}
+                          </td>
+                          <td>{l.daysCount} ngày</td>
+                          <td>
+                            <div className="nx-ed-reason">
+                              {l.reason || '—'}
+                              {l.attachmentName && (
+                                <small>{l.attachmentName}</small>
+                              )}
+                            </div>
+                          </td>
+                          <td>
+                            {l.handoverName ? (
+                              <>
+                                <strong>{l.handoverName}</strong>
+                                {l.handoverPosition && (
+                                  <div className="muted">
+                                    {l.handoverPosition}
+                                  </div>
+                                )}
+                              </>
+                            ) : (
+                              '—'
+                            )}
+                          </td>
+                          <td>
+                            {l.reviewerName || '—'}
+                            {l.reviewedAt && (
+                              <div className="muted">
+                                {fmtDate(String(l.reviewedAt).slice(0, 10))}
+                              </div>
+                            )}
+                          </td>
+                          <td>
+                            <span
+                              className={`nx-ed-st ${
+                                l.status === 'APPROVED'
+                                  ? 'DONE'
+                                  : l.status === 'PENDING'
+                                    ? 'REVIEW'
+                                    : 'TODO'
+                              }`}
+                            >
+                              {leaveStatusLabel(l.status)}
+                            </span>
+                          </td>
+                          <td>
+                            <Link to={`/leave/${l.id}`} className="nx-ed-more" style={{ margin: 0 }}>
+                              Xem
+                            </Link>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
+              )}
+              <div className="nx-ed-tab-foot">
+                Hiển thị {detail.leaveHistory.length} đơn đã ghi nhận
+                {canManage && <Link to="/leave">Quản lý nghỉ phép</Link>}
+              </div>
+            </section>
+          )}
+        </div>
+
+        {tab === 'info' && (
+        <aside className="nx-ed-side">
+          <section className="nx-ed-card">
+            <h3>Chấm công hôm nay</h3>
+            <div className="nx-ed-att-today">
+              <div className="row">
+                <span>Giờ vào</span>
+                <strong>
+                  {detail.attendanceToday.checkInTime || '—'}
+                </strong>
+              </div>
+              <div className="row">
+                <span>Trạng thái</span>
+                <strong
+                  className={
+                    detail.attendanceToday.present ? 'ok' : 'muted'
+                  }
+                >
+                  {detail.attendanceToday.present
+                    ? 'CÓ MẶT'
+                    : detail.todayPresence?.label || 'CHƯA CHẤM'}
+                </strong>
+              </div>
+              <div className="row">
+                <span>Ảnh check-in</span>
+                <strong>
+                  {detail.attendanceToday.hasPhoto
+                    ? 'Đã lưu'
+                    : 'Chưa có'}
+                </strong>
+              </div>
+              <div className="row">
+                <span>Ra hôm qua</span>
+                <strong>{detail.yesterdayCheckout || '—'}</strong>
+              </div>
+              <div className="row">
+                <span>Giờ tháng (ước tính)</span>
+                <strong>
+                  {m.monthHoursEstimate} / {m.monthHoursTarget}h
+                </strong>
               </div>
             </div>
-          </div>
+          </section>
+
+          <section className="nx-ed-card">
+            <h3>Hạn mức nghỉ phép {new Date().getFullYear()}</h3>
+            <div className="nx-ed-leave-quota">
+              <div className="nums">
+                <strong>{m.leaveRemaining}</strong>
+                <span>/ {m.leaveQuota} ngày còn lại</span>
+              </div>
+              <div className="bar">
+                <i
+                  style={{
+                    width: `${Math.min(100, m.leaveRemainingPct)}%`,
+                  }}
+                />
+              </div>
+              {detail.recentLeave && (
+                <p className="recent">
+                  Gần nhất: {detail.recentLeave.leaveTypeLabel} —{' '}
+                  {detail.recentLeave.daysCount} ngày (
+                  {fmtDate(detail.recentLeave.startDate)})
+                </p>
+              )}
+              {canManage && (
+                <Link to="/leave" className="nx-ed-more">
+                  Chuyển sang Quản lý nghỉ phép
+                </Link>
+              )}
+            </div>
+          </section>
+
+          {detail.projects.length > 0 && (
+            <section className="nx-ed-card">
+              <h3>Dự án tham gia</h3>
+              <div className="nx-ed-tags">
+                {detail.projects.map((p) => (
+                  <span key={p}>{p}</span>
+                ))}
+              </div>
+            </section>
+          )}
         </aside>
-
-        <div>
-          <section className="nx-ed-card">
-            <h2>Hồ sơ lý lịch &amp; vị trí công tác</h2>
-            <div className="nx-ed-form">
-              <div className="nx-ed-field">
-                <label>Mã nhân viên</label>
-                <input value={detail.employeeCode} disabled />
-              </div>
-              <div className="nx-ed-field">
-                <label>Họ và tên *</label>
-                <input
-                  value={form.fullName}
-                  disabled={!canManage}
-                  onChange={(e) => setField('fullName', e.target.value)}
-                />
-              </div>
-              <div className="nx-ed-field">
-                <label>Ngày sinh</label>
-                <input
-                  type="date"
-                  value={form.dateOfBirth}
-                  disabled={!canManage}
-                  onChange={(e) => setField('dateOfBirth', e.target.value)}
-                />
-              </div>
-              <div className="nx-ed-field">
-                <label>Giới tính</label>
-                <select
-                  value={form.gender}
-                  disabled={!canManage}
-                  onChange={(e) => setField('gender', e.target.value)}
-                >
-                  <option value="MALE">Nam</option>
-                  <option value="FEMALE">Nữ</option>
-                  <option value="OTHER">Khác</option>
-                </select>
-              </div>
-              <div className="nx-ed-field">
-                <label>CCCD / Hộ chiếu</label>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <input
-                    style={{ flex: 1 }}
-                    value={
-                      showId
-                        ? form.nationalId || detail.nationalIdMasked || ''
-                        : detail.nationalIdMasked || '—'
-                    }
-                    disabled={!canManage || !showId}
-                    onChange={(e) => setField('nationalId', e.target.value)}
-                  />
-                  <button
-                    type="button"
-                    className="nx-btn-outline"
-                    onClick={() => setShowId((v) => !v)}
-                  >
-                    {showId ? 'Ẩn' : 'Hiện'}
-                  </button>
-                </div>
-              </div>
-              <div className="nx-ed-field">
-                <label>Email công vụ *</label>
-                <input
-                  value={form.email}
-                  disabled={!canManage && user?.role !== 'EMPLOYEE'}
-                  onChange={(e) => setField('email', e.target.value)}
-                />
-              </div>
-              <div className="nx-ed-field">
-                <label>Số điện thoại *</label>
-                <input
-                  value={form.phone}
-                  disabled={!canManage && user?.role !== 'EMPLOYEE'}
-                  onChange={(e) => setField('phone', e.target.value)}
-                />
-              </div>
-              <div className="nx-ed-field">
-                <label>Phòng ban</label>
-                <select
-                  value={form.departmentId}
-                  disabled={!canManage}
-                  onChange={(e) => setField('departmentId', e.target.value)}
-                >
-                  <option value="">— Chưa gán —</option>
-                  {depts.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="nx-ed-field">
-                <label>Chức vụ</label>
-                <input
-                  value={form.position}
-                  disabled={!canManage}
-                  onChange={(e) => setField('position', e.target.value)}
-                />
-              </div>
-              <div className="nx-ed-field">
-                <label>Quản lý trực tiếp</label>
-                <select
-                  value={form.managerEmployeeId}
-                  disabled={!canManage}
-                  onChange={(e) =>
-                    setField('managerEmployeeId', e.target.value)
-                  }
-                >
-                  <option value="">— Chưa gán —</option>
-                  {managers
-                    .filter((m) => m.id !== detail.id)
-                    .map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.fullName}
-                        {m.position ? ` — ${m.position}` : ''}
-                      </option>
-                    ))}
-                </select>
-              </div>
-              <div className="nx-ed-field">
-                <label>Loại hợp đồng</label>
-                <select
-                  value={form.contractType}
-                  disabled={!canManage}
-                  onChange={(e) => setField('contractType', e.target.value)}
-                >
-                  <option value="PROBATION">Thử việc</option>
-                  <option value="OFFICIAL">Chính thức có thời hạn</option>
-                  <option value="INDEFINITE">Chính thức vô thời hạn</option>
-                  <option value="INTERN">Thực tập</option>
-                </select>
-              </div>
-              <div className="nx-ed-field full">
-                <label>Địa chỉ thường trú</label>
-                <textarea
-                  value={form.permanentAddress}
-                  disabled={!canManage}
-                  onChange={(e) =>
-                    setField('permanentAddress', e.target.value)
-                  }
-                />
-              </div>
-              <div className="nx-ed-field full">
-                <label>Địa chỉ tạm trú</label>
-                <textarea
-                  value={form.temporaryAddress}
-                  disabled={!canManage && user?.role !== 'EMPLOYEE'}
-                  onChange={(e) =>
-                    setField('temporaryAddress', e.target.value)
-                  }
-                />
-              </div>
-            </div>
-          </section>
-
-          <section className="nx-ed-card">
-            <h2>Tài khoản hệ thống liên kết</h2>
-            {!detail.account.linked ? (
-              <div>
-                <p className="text-muted mb-2">Chưa cấp tài khoản đăng nhập.</p>
-                {canAdmin && (
-                  <Link to="/users/new" className="nx-btn-primary">
-                    Cấp tài khoản mới
-                  </Link>
-                )}
-              </div>
-            ) : (
-              <div className="nx-ed-acc">
-                <div className="nx-ed-acc-meta">
-                  <div>
-                    <strong>@{detail.account.username}</strong> · UID ACC-
-                    {String(detail.account.id).padStart(5, '0')}
-                  </div>
-                  <div>
-                    Vai trò RBAC: <strong>{detail.account.role}</strong>
-                    {detail.account.locked ? ' · Đã khóa' : ' · Hoạt động'}
-                  </div>
-                  <div className="text-muted" style={{ fontSize: '0.8rem' }}>
-                    Hợp đồng hồ sơ: {contractLabel(detail.contractType)}
-                  </div>
-                </div>
-                <div className="nx-ed-acc-actions">
-                  {canAdmin && (
-                    <button
-                      type="button"
-                      className="nx-btn-outline"
-                      disabled={saving}
-                      onClick={() => void resetPassword()}
-                    >
-                      Đặt lại mật khẩu
-                    </button>
-                  )}
-                  <Link
-                    to={`/users/${detail.account.id}`}
-                    className="nx-btn-primary"
-                  >
-                    Chi tiết tài khoản
-                  </Link>
-                </div>
-              </div>
-            )}
-          </section>
-
-          <section className="nx-ed-card">
-            <h2>Lịch sử điều chỉnh hồ sơ &amp; bổ nhiệm</h2>
-            <div style={{ overflowX: 'auto' }}>
-              <table className="nx-ed-audit">
-                <thead>
-                  <tr>
-                    <th>Thời điểm</th>
-                    <th>Sự kiện</th>
-                    <th>Chi tiết</th>
-                    <th>Người thực hiện</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {audit.length === 0 && (
-                    <tr>
-                      <td colSpan={4} className="text-muted">
-                        Chưa có nhật ký trên hồ sơ này.
-                      </td>
-                    </tr>
-                  )}
-                  {audit.map((row) => (
-                    <tr key={row.id}>
-                      <td>{fmtDate(row.createdAt)}</td>
-                      <td>
-                        <strong>{actionLabel(row.action)}</strong>
-                      </td>
-                      <td>
-                        {row.metadata
-                          ? Object.entries(row.metadata)
-                              .map(([k, v]) => `${k}: ${String(v)}`)
-                              .join(' · ')
-                          : '—'}
-                      </td>
-                      <td>{row.actorUsername}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        </div>
+        )}
       </div>
-
-      <div className="nx-ed-foot">
-        <div className="hint">
-          {user?.role === 'EMPLOYEE'
-            ? 'Nhân viên chỉ được sửa một số thông tin liên hệ (US-16).'
-            : 'Chế độ xem & chỉnh sửa trực tiếp — lưu qua API PATCH.'}
-        </div>
-        <button
-          type="button"
-          className="nx-btn-outline"
-          onClick={() => {
-            setForm(toForm(detail));
-            navigate('/employees');
-          }}
-        >
-          Hủy thay đổi
-        </button>
-        <button
-          type="button"
-          className="nx-btn-primary"
-          disabled={saving || !dirty}
-          onClick={() => void saveProfile()}
-        >
-          {saving ? 'Đang lưu…' : 'Cập nhật hồ sơ nhân sự (AD-08)'}
-        </button>
-      </div>
-
-      <Modal show={!!tempPass} onHide={() => setTempPass(null)} centered>
-        <Modal.Header closeButton>
-          <Modal.Title>Mật khẩu tạm</Modal.Title>
-        </Modal.Header>
-        <Modal.Body>
-          <code
-            style={{
-              display: 'block',
-              padding: '0.75rem',
-              background: '#f4f7f6',
-              borderRadius: 8,
-            }}
-          >
-            {tempPass}
-          </code>
-        </Modal.Body>
-        <Modal.Footer>
-          <button
-            type="button"
-            className="nx-btn-outline"
-            onClick={async () => {
-              if (tempPass) await navigator.clipboard.writeText(tempPass);
-              setTempPass(null);
-            }}
-          >
-            Sao chép &amp; đóng
-          </button>
-        </Modal.Footer>
-      </Modal>
     </div>
   );
 }

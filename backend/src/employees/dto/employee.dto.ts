@@ -158,6 +158,21 @@ export class ListEmployeesQueryDto {
   @IsEnum(EmployeeStatus)
   status?: EmployeeStatus;
 
+  /** Lọc theo chức danh (khớp gần đúng) */
+  @IsOptional()
+  @IsString()
+  position?: string;
+
+  /** ACTIVE | LOCKED | NONE */
+  @IsOptional()
+  @IsString()
+  account?: string;
+
+  /** WORKING | ABSENT | LOCKED — quick tabs manager */
+  @IsOptional()
+  @IsString()
+  presence?: string;
+
   @IsOptional()
   @IsString()
   sort?: string;

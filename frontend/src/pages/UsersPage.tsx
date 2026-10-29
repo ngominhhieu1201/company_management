@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Spinner } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
 import api from '../api/client';
+import { useAuth } from '../contexts/AuthContext';
 import '../styles/users.css';
 
 
@@ -40,6 +41,7 @@ type Stats = {
   availabilityPct: number;
   lockedInactiveEmp: number;
   lockedOther: number;
+  pendingUnlockRequests?: number;
 };
 
 type Dept = { id: number; name: string };
@@ -106,6 +108,10 @@ function exportCsv(rows: UserRow[]) {
 }
 
 export default function UsersPage() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'ADMIN';
+  const isManager = user?.role === 'MANAGER';
+
   const [items, setItems] = useState<UserRow[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [total, setTotal] = useState(0);
@@ -222,8 +228,16 @@ export default function UsersPage() {
     <div>
       <div className="nx-users-head">
         <div>
-          <h1>Quản Lý Tài Khoản Người Dùng</h1>
-          <p>Quản trị RBAC, khóa/mở khóa và liên kết nhân sự từ dữ liệu hệ thống.</p>
+          <h1>
+            {isManager
+              ? 'Quản lý & Giám sát Tài khoản Nhân sự'
+              : 'Quản Lý Tài Khoản Người Dùng'}
+          </h1>
+          <p>
+            {isManager
+              ? 'Theo dõi trạng thái đăng nhập nhân sự trong phạm vi quản lý và gửi yêu cầu mở khóa khi cần.'
+              : 'Quản trị RBAC, khóa/mở khóa và liên kết nhân sự từ dữ liệu hệ thống.'}
+          </p>
         </div>
         <div className="nx-users-actions">
           <button type="button" className="nx-btn-outline" onClick={() => void exportAll()}>
@@ -232,9 +246,11 @@ export default function UsersPage() {
             </svg>
             Xuất danh sách
           </button>
-          <Link to="/users/new" className="nx-btn-primary">
-            + Thêm tài khoản mới
-          </Link>
+          {isAdmin && (
+            <Link to="/users/new" className="nx-btn-primary">
+              + Thêm tài khoản mới
+            </Link>
+          )}
         </div>
       </div>
 
@@ -245,14 +261,18 @@ export default function UsersPage() {
       )}
 
       {stats && (
-        <div className="nx-users-kpis">
+        <div className={`nx-users-kpis ${isManager ? 'manager' : ''}`}>
           <div className="nx-ukpi">
             <div className="nx-ukpi-top">
               <div>
-                <div className="nx-ukpi-label">Tổng tài khoản</div>
+                <div className="nx-ukpi-label">
+                  {isManager ? 'Tài khoản trong phạm vi' : 'Tổng tài khoản'}
+                </div>
                 <div className="nx-ukpi-value">{stats.total}</div>
                 <div className="nx-ukpi-hint">
-                  {stats.coveragePct}% đã liên kết nhân sự
+                  {isManager
+                    ? `${stats.active} đang hoạt động`
+                    : `${stats.coveragePct}% đã liên kết nhân sự`}
                 </div>
               </div>
               <div className="nx-ukpi-icon teal">
@@ -300,24 +320,63 @@ export default function UsersPage() {
               </div>
             </div>
           </div>
-          <div className="nx-ukpi">
-            <div className="nx-ukpi-top">
-              <div>
-                <div className="nx-ukpi-label">Đặc quyền</div>
-                <div className="nx-ukpi-value">{stats.privileged}</div>
-                <div className="nx-ukpi-hint">
-                  {stats.adminCount} Admin · {stats.managerCount} Manager
+          {isManager ? (
+            <div className="nx-ukpi">
+              <div className="nx-ukpi-top">
+                <div>
+                  <div className="nx-ukpi-label">Yêu cầu mở khóa</div>
+                  <div className="nx-ukpi-value">
+                    {String(stats.pendingUnlockRequests ?? 0).padStart(2, '0')}
+                  </div>
+                  <div className="nx-ukpi-hint">90 ngày gần nhất (audit)</div>
+                </div>
+                <div className="nx-ukpi-icon gold">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M12 9v4M12 17h.01M10.3 3.6 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 3.6a2 2 0 0 0-3.4 0Z" />
+                  </svg>
                 </div>
               </div>
-              <div className="nx-ukpi-icon gold">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M12 2 4 6v6c0 5 3.4 9.4 8 10 4.6-.6 8-5 8-10V6l-8-4Z" />
-                </svg>
+            </div>
+          ) : (
+            <div className="nx-ukpi">
+              <div className="nx-ukpi-top">
+                <div>
+                  <div className="nx-ukpi-label">Đặc quyền</div>
+                  <div className="nx-ukpi-value">{stats.privileged}</div>
+                  <div className="nx-ukpi-hint">
+                    {stats.adminCount} Admin · {stats.managerCount} Manager
+                  </div>
+                </div>
+                <div className="nx-ukpi-icon gold">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2 4 6v6c0 5 3.4 9.4 8 10 4.6-.6 8-5 8-10V6l-8-4Z" />
+                  </svg>
+                </div>
               </div>
             </div>
-          </div>
+          )}
         </div>
       )}
+
+      <div className="nx-status-chips">
+        {[
+          { value: '', label: 'Tất cả' },
+          { value: 'ACTIVE', label: 'ACTIVE' },
+          { value: 'LOCKED', label: 'LOCKED' },
+        ].map((chip) => (
+          <button
+            key={chip.label}
+            type="button"
+            className={`nx-status-chip ${status === chip.value ? 'active' : ''}`}
+            onClick={() => {
+              setPage(1);
+              setStatus(chip.value);
+            }}
+          >
+            {chip.label}
+          </button>
+        ))}
+      </div>
 
       <div className="nx-filters">
         <label className="nx-f-search">
@@ -331,18 +390,20 @@ export default function UsersPage() {
             placeholder="Username, UID, email, nhân sự..."
           />
         </label>
-        <select
-          value={role}
-          onChange={(e) => {
-            setPage(1);
-            setRole(e.target.value);
-          }}
-        >
-          <option value="">Tất cả vai trò</option>
-          <option value="ADMIN">ADMIN</option>
-          <option value="MANAGER">MANAGER</option>
-          <option value="EMPLOYEE">EMPLOYEE</option>
-        </select>
+        {!isManager && (
+          <select
+            value={role}
+            onChange={(e) => {
+              setPage(1);
+              setRole(e.target.value);
+            }}
+          >
+            <option value="">Tất cả vai trò</option>
+            <option value="ADMIN">ADMIN</option>
+            <option value="MANAGER">MANAGER</option>
+            <option value="EMPLOYEE">EMPLOYEE</option>
+          </select>
+        )}
         <select
           value={departmentId}
           onChange={(e) => {
@@ -477,34 +538,47 @@ export default function UsersPage() {
                             <path d="M4 20h4L18 10l-4-4L4 16v4Z" />
                           </svg>
                         </Link>
-                        <Link
-                          to={`/users/${u.id}`}
-                          className="nx-icon-act"
-                          title="Audit"
-                          style={{ textDecoration: 'none' }}
-                        >
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path d="M7 4h10a2 2 0 0 1 2 2v14l-3-2-3 2-3-2-3 2V6a2 2 0 0 1 2-2Z" />
-                          </svg>
-                        </Link>
-                        <button
-                          type="button"
-                          className={`nx-icon-act ${u.status === 'LOCKED' ? 'unlock' : ''}`}
-                          title={u.status === 'ACTIVE' ? 'Khóa' : 'Mở khóa'}
-                          onClick={() => void toggleLock(u)}
-                        >
-                          {u.status === 'ACTIVE' ? (
+                        {!isManager && (
+                          <Link
+                            to={`/users/${u.id}`}
+                            className="nx-icon-act"
+                            title="Audit"
+                            style={{ textDecoration: 'none' }}
+                          >
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <rect x="5" y="11" width="14" height="10" rx="2" />
-                              <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+                              <path d="M7 4h10a2 2 0 0 1 2 2v14l-3-2-3 2-3-2-3 2V6a2 2 0 0 1 2-2Z" />
                             </svg>
-                          ) : (
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <rect x="5" y="11" width="14" height="10" rx="2" />
-                              <path d="M8 11V8a4 4 0 0 1 7.5-1.9" />
-                            </svg>
-                          )}
-                        </button>
+                          </Link>
+                        )}
+                        {isManager && u.status === 'LOCKED' ? (
+                          <Link
+                            to={`/users/${u.id}`}
+                            className="nx-btn-unlock-req"
+                          >
+                            Yêu cầu mở khóa
+                          </Link>
+                        ) : (
+                          isAdmin && (
+                            <button
+                              type="button"
+                              className={`nx-icon-act ${u.status === 'LOCKED' ? 'unlock' : ''}`}
+                              title={u.status === 'ACTIVE' ? 'Khóa' : 'Mở khóa'}
+                              onClick={() => void toggleLock(u)}
+                            >
+                              {u.status === 'ACTIVE' ? (
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <rect x="5" y="11" width="14" height="10" rx="2" />
+                                  <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+                                </svg>
+                              ) : (
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <rect x="5" y="11" width="14" height="10" rx="2" />
+                                  <path d="M8 11V8a4 4 0 0 1 7.5-1.9" />
+                                </svg>
+                              )}
+                            </button>
+                          )
+                        )}
                       </div>
                     </td>
                   </tr>

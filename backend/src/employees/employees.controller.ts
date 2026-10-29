@@ -46,7 +46,7 @@ export class EmployeesController {
   }
 
   @Get('next-code')
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   nextCode() {
     return this.service.nextCode();
   }
@@ -84,7 +84,7 @@ export class EmployeesController {
   }
 
   @Post()
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   create(@Body() dto: CreateEmployeeDto, @CurrentUser() user: any) {
     return this.service.create(dto, user.id);
   }

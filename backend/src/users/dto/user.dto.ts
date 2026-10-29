@@ -86,3 +86,13 @@ export class ListUsersQueryDto {
   @IsInt()
   pageSize?: number;
 }
+
+export class UnlockRequestDto {
+  @IsString()
+  @MinLength(3)
+  reason: string;
+
+  @IsOptional()
+  @IsString()
+  urgency?: string;
+}

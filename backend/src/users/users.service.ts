@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -19,11 +20,18 @@ import { Task } from '../tasks/task.entity';
 import {
   CreateUserDto,
   ListUsersQueryDto,
+  UnlockRequestDto,
   UpdateUserDto,
 } from './dto/user.dto';
 import { User } from './user.entity';
 
 const ONLINE_MS = 30 * 60 * 1000;
+
+export type AuthUser = {
+  id: number;
+  role: UserRole;
+  employeeId: number | null;
+};
 
 @Injectable()
 export class UsersService {
@@ -60,6 +68,66 @@ export class UsersService {
   private isOnline(lastLoginAt: Date | null) {
     if (!lastLoginAt) return false;
     return Date.now() - new Date(lastLoginAt).getTime() < ONLINE_MS;
+  }
+
+  async managedDepartmentIds(user: AuthUser): Promise<number[]> {
+    if (!user.employeeId) return [];
+    const depts = await this.departments.find({
+      where: { managerEmployeeId: user.employeeId },
+    });
+    return depts.map((d) => d.id);
+  }
+
+  private async filterRowsForActor<
+    T extends { id: number; employee?: { departmentId?: number | null } | null },
+  >(rows: T[], actor: AuthUser): Promise<T[]> {
+    if (actor.role === UserRole.ADMIN) return rows;
+    if (actor.role === UserRole.MANAGER) {
+      const deptIds = await this.managedDepartmentIds(actor);
+      return rows.filter(
+        (r) =>
+          r.id === actor.id ||
+          (r.employee?.departmentId != null &&
+            deptIds.includes(r.employee.departmentId)),
+      );
+    }
+    return rows;
+  }
+
+  async assertCanView(userId: number, actor: AuthUser) {
+    if (actor.role === UserRole.ADMIN) return;
+    if (userId === actor.id) return;
+    if (actor.role !== UserRole.MANAGER) {
+      throw new ForbiddenException('Insufficient permissions');
+    }
+    const user = await this.findById(userId);
+    if (!user) throw new NotFoundException('User not found');
+    if (!user.employeeId) {
+      throw new ForbiddenException('Insufficient permissions');
+    }
+    const emp = await this.employees.findOne({
+      where: { id: user.employeeId },
+    });
+    const deptIds = await this.managedDepartmentIds(actor);
+    if (
+      emp?.departmentId != null &&
+      deptIds.includes(emp.departmentId)
+    ) {
+      return;
+    }
+    throw new ForbiddenException('Insufficient permissions');
+  }
+
+  private async countPendingUnlockRequests(
+    actor: AuthUser,
+    visibleUserIds: number[],
+  ) {
+    const since = new Date();
+    since.setDate(since.getDate() - 90);
+    const ids =
+      actor.role === UserRole.MANAGER ? visibleUserIds : undefined;
+    if (ids?.length === 0) return 0;
+    return this.logs.countUnlockRequestsSince(since, ids);
   }
 
   async findByUsername(username: string) {
@@ -154,7 +222,8 @@ export class UsersService {
     ];
   }
 
-  async findDetail(id: number) {
+  async findDetail(id: number, actor?: AuthUser) {
+    if (actor) await this.assertCanView(id, actor);
     const user = await this.findById(id);
     if (!user) throw new NotFoundException('User not found');
     const [row] = await this.enrich([user]);
@@ -199,7 +268,8 @@ export class UsersService {
     };
   }
 
-  async audit(id: number, limit = 50) {
+  async audit(id: number, limit = 50, actor?: AuthUser) {
+    if (actor) await this.assertCanView(id, actor);
     const user = await this.findById(id);
     if (!user) throw new NotFoundException('User not found');
     const logs = await this.logs.findForAccount(id, limit);
@@ -272,9 +342,12 @@ export class UsersService {
     return { id: user.id, username: user.username, temporaryPassword };
   }
 
-  async findAll(query: ListUsersQueryDto = {}) {
+  async findAll(query: ListUsersQueryDto = {}, actor?: AuthUser) {
     const users = await this.repo.find({ order: { id: 'ASC' } });
     let rows = await this.enrich(users);
+    if (actor) {
+      rows = await this.filterRowsForActor(rows, actor);
+    }
 
     const q = query.q?.trim().toLowerCase();
     if (q) {
@@ -315,8 +388,14 @@ export class UsersService {
     };
   }
 
-  async stats() {
-    const users = await this.repo.find();
+  async stats(actor?: AuthUser) {
+    let users = await this.repo.find();
+    if (actor && actor.role === UserRole.MANAGER) {
+      const enriched = await this.enrich(users);
+      const scoped = await this.filterRowsForActor(enriched, actor);
+      const scopedIds = new Set(scoped.map((r) => r.id));
+      users = users.filter((u) => scopedIds.has(u.id));
+    }
     const emps = await this.employees.find();
     const empMap = new Map(emps.map((e) => [e.id, e]));
 
@@ -344,6 +423,14 @@ export class UsersService {
     }
     const lockedOther = locked - lockedInactiveEmp;
 
+    const visibleUserIds = users.map((u) => u.id);
+    const pendingUnlockRequests = actor
+      ? await this.countPendingUnlockRequests(actor, visibleUserIds)
+      : await this.countPendingUnlockRequests(
+          { id: 0, role: UserRole.ADMIN, employeeId: null },
+          visibleUserIds,
+        );
+
     return {
       total,
       active,
@@ -355,7 +442,80 @@ export class UsersService {
       availabilityPct,
       lockedInactiveEmp,
       lockedOther,
+      pendingUnlockRequests,
     };
+  }
+
+  async requestUnlock(
+    id: number,
+    actor: AuthUser,
+    dto: UnlockRequestDto,
+  ) {
+    await this.assertCanView(id, actor);
+    const user = await this.findById(id);
+    if (!user) throw new NotFoundException('User not found');
+    if (user.status !== AccountStatus.LOCKED) {
+      throw new BadRequestException('Account is not locked');
+    }
+    const year = new Date().getFullYear();
+    const ticketCode = `TK-${year}-${id}`;
+    await this.logs.log({
+      actorUserId: actor.id,
+      action: 'USER_UNLOCK_REQUEST',
+      entityType: 'User',
+      entityId: user.id,
+      metadata: {
+        reason: dto.reason.trim(),
+        urgency: dto.urgency?.trim() || null,
+        ticketCode,
+        targetUsername: user.username,
+      },
+    });
+    return { ok: true, ticketCode };
+  }
+
+  async getProfile(actor: AuthUser) {
+    const user = await this.findById(actor.id);
+    if (!user) throw new NotFoundException('User not found');
+    const [row] = await this.enrich([user]);
+    let managedHeadcount: number | null = null;
+    if (actor.role === UserRole.MANAGER) {
+      const deptIds = await this.managedDepartmentIds(actor);
+      if (deptIds.length > 0) {
+        managedHeadcount = await this.employees.count({
+          where: { departmentId: In(deptIds) },
+        });
+      } else {
+        managedHeadcount = 0;
+      }
+    }
+    return {
+      ...row,
+      managedHeadcount,
+    };
+  }
+
+  async changePassword(
+    actorId: number,
+    currentPassword: string,
+    newPassword: string,
+  ) {
+    const user = await this.findById(actorId);
+    if (!user) throw new NotFoundException('User not found');
+    const ok = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!ok) {
+      throw new BadRequestException('Current password is incorrect');
+    }
+    user.passwordHash = await bcrypt.hash(newPassword, 10);
+    await this.repo.save(user);
+    await this.logs.log({
+      actorUserId: actorId,
+      action: 'USER_CHANGE_PASSWORD',
+      entityType: 'User',
+      entityId: user.id,
+      metadata: { username: user.username },
+    });
+    return { ok: true };
   }
 
   async checkUsername(username: string) {

@@ -62,6 +62,22 @@ export class SystemLogsService {
       .getMany();
   }
 
+  async countUnlockRequestsSince(
+    since: Date,
+    entityUserIds?: number[],
+  ): Promise<number> {
+    const qb = this.repo
+      .createQueryBuilder('l')
+      .where('l.action = :action', { action: 'USER_UNLOCK_REQUEST' })
+      .andWhere('l.created_at >= :since', { since });
+    if (entityUserIds?.length) {
+      qb.andWhere('l.entity_id IN (:...ids)', {
+        ids: entityUserIds.map(String),
+      });
+    }
+    return qb.getCount();
+  }
+
   async findForEntity(
     entityType: string,
     entityId: string | number,

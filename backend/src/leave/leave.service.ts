@@ -92,6 +92,16 @@ export class LeaveService {
     const depts = await this.deptRepo.find();
     const empMap = new Map(emps.map((e) => [e.id, e]));
     const deptMap = new Map(depts.map((d) => [d.id, d]));
+    const reviewIds = [
+      ...new Set(
+        rows.map((r) => r.reviewBy).filter((x): x is number => x != null),
+      ),
+    ];
+    const reviewers =
+      reviewIds.length > 0
+        ? await this.users.find({ where: { id: In(reviewIds) } })
+        : [];
+    const reviewerMap = new Map(reviewers.map((u) => [u.id, u.username]));
     const year = new Date().getFullYear();
     const result = [];
     for (const r of rows) {
@@ -149,6 +159,9 @@ export class LeaveService {
         status: r.status,
         reviewBy: r.reviewBy,
         reviewedAt: r.reviewedAt,
+        reviewerName: r.reviewBy
+          ? (reviewerMap.get(r.reviewBy) ?? null)
+          : null,
         reviewComment: r.reviewComment,
         quota: {
           year,
@@ -186,6 +199,21 @@ export class LeaveService {
     for (const r of rows) {
       byType[r.leaveType] = (byType[r.leaveType] || 0) + 1;
     }
+    const reviewed = rows.filter(
+      (r) =>
+        r.reviewedAt &&
+        (r.status === LeaveStatus.APPROVED ||
+          r.status === LeaveStatus.REJECTED),
+    );
+    let avgResponseHours: number | null = null;
+    if (reviewed.length > 0) {
+      const totalH = reviewed.reduce((sum, r) => {
+        const created = new Date(r.createdAt).getTime();
+        const rev = new Date(r.reviewedAt!).getTime();
+        return sum + (rev - created) / 3_600_000;
+      }, 0);
+      avgResponseHours = Math.round((totalH / reviewed.length) * 10) / 10;
+    }
     return {
       total: rows.length,
       pending: pending.length,
@@ -197,6 +225,7 @@ export class LeaveService {
           ? Math.round((rejected.length / rows.length) * 1000) / 10
           : 0,
       onLeaveToday: onLeaveToday.length,
+      avgResponseHours,
       byType,
       month,
       today,

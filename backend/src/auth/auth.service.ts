@@ -2,9 +2,9 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
-import { AccountStatus } from '../common/enums';
+import { AccountStatus, UserRole } from '../common/enums';
 import { SystemLogsService } from '../system-logs/system-logs.service';
-import { UsersService } from '../users/users.service';
+import { AuthUser, UsersService } from '../users/users.service';
 
 @Injectable()
 export class AuthService {
@@ -71,6 +71,31 @@ export class AuthService {
 
   generateCsrfToken() {
     return randomBytes(32).toString('hex');
+  }
+
+  getProfile(user: {
+    id: number;
+    role: string;
+    employeeId: number | null;
+  }) {
+    const actor: AuthUser = {
+      id: user.id,
+      role: user.role as UserRole,
+      employeeId: user.employeeId,
+    };
+    return this.usersService.getProfile(actor);
+  }
+
+  changePassword(
+    userId: number,
+    currentPassword: string,
+    newPassword: string,
+  ) {
+    return this.usersService.changePassword(
+      userId,
+      currentPassword,
+      newPassword,
+    );
   }
 
   extractClientIp(req: {

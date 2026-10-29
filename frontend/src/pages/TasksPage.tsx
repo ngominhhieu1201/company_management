@@ -23,20 +23,54 @@ type TaskRow = {
   priority: string;
   status: string;
   progress: number;
+  startDate?: string | null;
   dueDate: string | null;
   sla: string;
 };
 
+function fmtDate(iso: string | null | undefined) {
+  if (!iso) return '—';
+  const [y, m, d] = iso.slice(0, 10).split('-');
+  if (!y || !m || !d) return iso;
+  return `${d}/${m}/${y}`;
+}
+
+function dueLabel(due: string | null, sla: string) {
+  if (!due) return null;
+  if (sla === 'overdue') return 'Quá hạn';
+  if (sla === 'today') return 'Hôm nay';
+  if (sla === 'soon') {
+    const today = new Date().toISOString().slice(0, 10);
+    const diff = Math.round(
+      (new Date(due + 'T00:00:00').getTime() -
+        new Date(today + 'T00:00:00').getTime()) /
+        86400000,
+    );
+    return diff > 0 ? `Còn ${diff} ngày` : 'Sắp hạn';
+  }
+  return null;
+}
+
 type Stats = {
   total: number;
   active: number;
+  incomplete?: number;
   inProgress: number;
   review: number;
+  todo?: number;
+  done?: number;
+  donePct?: number;
   doneSprint: number;
   mine: number;
   urgent: number;
   soonSla: number;
+  overdue?: number;
+  onTimePct?: number;
+  avgDays?: number | null;
+  scopeDeptCode?: string | null;
+  scopeEmployees?: number;
   byPriority: Record<string, number>;
+  byStatus?: Record<string, number>;
 };
 
 type Dept = { id: number; name: string };
@@ -95,13 +129,15 @@ export default function TasksPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const canCreate = user?.role === 'ADMIN' || user?.role === 'MANAGER';
+  const isManager = user?.role === 'MANAGER';
 
   const [items, setItems] = useState<TaskRow[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [depts, setDepts] = useState<Dept[]>([]);
+  const [emps, setEmps] = useState<Emp[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [pageSize] = useState(10);
+  const [pageSize, setPageSize] = useState(10);
   const [totalPages, setTotalPages] = useState(1);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -111,6 +147,8 @@ export default function TasksPage() {
   const [q, setQ] = useState('');
   const [sla, setSla] = useState('');
   const [departmentId, setDepartmentId] = useState('');
+  const [assigneeId, setAssigneeId] = useState('');
+  const [status, setStatus] = useState('');
   const [priority, setPriority] = useState('');
   const [scope, setScope] = useState('');
   const [view, setView] = useState<'list' | 'kanban'>('list');
@@ -132,6 +170,8 @@ export default function TasksPage() {
         q: q || undefined,
         sla: sla || undefined,
         departmentId: departmentId ? Number(departmentId) : undefined,
+        assigneeId: assigneeId ? Number(assigneeId) : undefined,
+        status: status || undefined,
         priority: priority || undefined,
         scope: scope || undefined,
         page,
@@ -143,7 +183,7 @@ export default function TasksPage() {
     setTotal(data.total);
     setTotalPages(data.totalPages);
     setSelected([]);
-  }, [q, sla, departmentId, priority, scope, page, pageSize]);
+  }, [q, sla, departmentId, assigneeId, status, priority, scope, page, pageSize]);
 
   useEffect(() => {
     let c = false;
@@ -183,6 +223,10 @@ export default function TasksPage() {
 
   useEffect(() => {
     api.get('/departments').then((r) => setDepts(r.data)).catch(() => undefined);
+    api
+      .get('/employees/options')
+      .then((r) => setEmps(r.data))
+      .catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -213,18 +257,31 @@ export default function TasksPage() {
     );
   }
 
+  const incomplete = stats?.incomplete ?? stats?.active ?? 0;
+  const doneCount = stats?.done ?? stats?.byStatus?.DONE ?? 0;
+
   return (
     <div>
       <div className="nx-tk-crumb">
-        <span>Quản trị hệ thống</span>
+        <span>{isManager ? 'Quản trị quản lý' : 'Quản trị hệ thống'}</span>
         <span>›</span>
-        <span>Quản lý công việc</span>
+        <span>Phân hệ Công việc</span>
+        <span>›</span>
+        <span>Danh sách công việc</span>
       </div>
       <div className="nx-tk-head">
-        <h1>Quản Lý &amp; Điều Phối Công Việc</h1>
+        <div>
+          <h1>Quản Lý &amp; Điều Phối Công Việc</h1>
+          {isManager && stats && (
+            <div className="nx-tk-scope-tags">
+              {stats.scopeDeptCode && <span>{stats.scopeDeptCode}</span>}
+              <span>{stats.scopeEmployees ?? 0} NHÂN SỰ</span>
+            </div>
+          )}
+        </div>
         <div className="nx-tk-actions">
           <button type="button" className="nx-btn-outline" onClick={() => exportCsv(items)}>
-            Xuất Excel
+            Xuất báo cáo Excel
           </button>
           {canCreate && (
             <Link to="/tasks/new" className="nx-btn-primary">
@@ -245,33 +302,42 @@ export default function TasksPage() {
           <div className="nx-tk-kpi">
             <div className="ico blue">◎</div>
             <div>
-              <div className="label">Tổng công việc Active</div>
-              <div className="value">{stats.active}</div>
-              <div className="hint">Chưa DONE</div>
+              <div className="label">Tổng công việc</div>
+              <div className="value">{stats.total}</div>
+              <div className="hint">100% trong phạm vi quản lý</div>
             </div>
           </div>
           <div className="nx-tk-kpi">
-            <div className="ico green">↗</div>
+            <div className="ico orange">!</div>
             <div>
-              <div className="label">Đang xử lý</div>
-              <div className="value">{stats.inProgress}</div>
-              <div className="hint">IN_PROGRESS</div>
+              <div className="label">Chưa hoàn thành</div>
+              <div className="value">{incomplete}</div>
+              <div className="hint">
+                {stats.urgent} khẩn cấp P0 · {stats.inProgress} đang làm ·{' '}
+                {stats.soonSla} cận hạn
+              </div>
             </div>
           </div>
           <div className="nx-tk-kpi">
-            <div className="ico orange">◉</div>
+            <div className="ico green">✓</div>
             <div>
-              <div className="label">Cần thẩm định</div>
-              <div className="value">{stats.review}</div>
-              <div className="hint">REVIEW</div>
+              <div className="label">Đã hoàn thành</div>
+              <div className="value">{doneCount}</div>
+              <div className="hint">
+                Tỷ lệ hoàn thành: {stats.donePct ?? 0}% · Sprint tuần:{' '}
+                {stats.doneSprint}
+              </div>
             </div>
           </div>
           <div className="nx-tk-kpi">
-            <div className="ico teal">✓</div>
+            <div className="ico teal">↗</div>
             <div>
-              <div className="label">Hoàn thành sprint</div>
-              <div className="value">{stats.doneSprint}</div>
-              <div className="hint">DONE trong tuần</div>
+              <div className="label">Hiệu suất bàn giao</div>
+              <div className="value">{stats.onTimePct ?? 100}%</div>
+              <div className="hint">
+                TB xử lý:{' '}
+                {stats.avgDays != null ? `${stats.avgDays} ngày/task` : '—'}
+              </div>
             </div>
           </div>
         </div>
@@ -286,9 +352,38 @@ export default function TasksPage() {
           <input
             value={qDraft}
             onChange={(e) => setQDraft(e.target.value)}
-            placeholder="Tìm mã TSK hoặc tiêu đề…"
+            placeholder="Tìm theo tên công việc, mã task (TSK-xxxx)..."
           />
         </label>
+        <select
+          value={assigneeId}
+          onChange={(e) => {
+            setAssigneeId(e.target.value);
+            setPage(1);
+          }}
+        >
+          <option value="">Nhân sự: Tất cả</option>
+          {emps.map((e) => (
+            <option key={e.id} value={e.id}>
+              {e.fullName}
+            </option>
+          ))}
+        </select>
+        <select
+          value={status}
+          onChange={(e) => {
+            setStatus(e.target.value);
+            setScope('');
+            setPage(1);
+          }}
+        >
+          <option value="">Trạng thái: Tất cả</option>
+          {Object.entries(ST).map(([k, v]) => (
+            <option key={k} value={k}>
+              {v}
+            </option>
+          ))}
+        </select>
         <select
           value={sla}
           onChange={(e) => {
@@ -296,46 +391,34 @@ export default function TasksPage() {
             setPage(1);
           }}
         >
-          <option value="">SLA: Tất cả</option>
+          <option value="">Hạn: Tất cả</option>
           <option value="overdue">Quá hạn</option>
           <option value="soon">Sắp quá hạn</option>
           <option value="today">Hôm nay</option>
           <option value="week">Trong 7 ngày</option>
         </select>
-        <select
-          value={departmentId}
-          onChange={(e) => {
-            setDepartmentId(e.target.value);
-            setPage(1);
-          }}
-        >
-          <option value="">Khối / Phòng ban</option>
-          {depts.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.name}
-            </option>
-          ))}
-        </select>
-        <select
-          value={priority}
-          onChange={(e) => {
-            setPriority(e.target.value);
-            setPage(1);
-          }}
-        >
-          <option value="">Ưu tiên</option>
-          {Object.entries(PRI).map(([k, v]) => (
-            <option key={k} value={k}>
-              {v}
-            </option>
-          ))}
-        </select>
+        {!isManager && (
+          <select
+            value={departmentId}
+            onChange={(e) => {
+              setDepartmentId(e.target.value);
+              setPage(1);
+            }}
+          >
+            <option value="">Khối / Phòng ban</option>
+            {depts.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.name}
+              </option>
+            ))}
+          </select>
+        )}
         <div className="nx-tk-view">
-          <button type="button" className={view === 'kanban' ? 'active' : ''} onClick={() => setView('kanban')}>
-            Kanban
-          </button>
           <button type="button" className={view === 'list' ? 'active' : ''} onClick={() => setView('list')}>
             Danh sách
+          </button>
+          <button type="button" className={view === 'kanban' ? 'active' : ''} onClick={() => setView('kanban')}>
+            Kanban
           </button>
         </div>
       </div>
@@ -344,15 +427,38 @@ export default function TasksPage() {
         <span className="lbl">Lọc nhanh</span>
         <button
           type="button"
-          className={`nx-tk-chip${!scope && !sla ? ' active' : ''}`}
+          className={`nx-tk-chip${!scope && !sla && !status ? ' active' : ''}`}
           onClick={() => {
             setScope('');
             setSla('');
+            setStatus('');
             setPriority('');
             setPage(1);
           }}
         >
           Tất cả ({stats?.total ?? 0})
+        </button>
+        <button
+          type="button"
+          className={`nx-tk-chip${scope === 'incomplete' ? ' active' : ''}`}
+          onClick={() => {
+            setScope('incomplete');
+            setStatus('');
+            setPage(1);
+          }}
+        >
+          Chưa hoàn thành ({incomplete})
+        </button>
+        <button
+          type="button"
+          className={`nx-tk-chip${scope === 'done' ? ' active' : ''}`}
+          onClick={() => {
+            setScope('done');
+            setStatus('');
+            setPage(1);
+          }}
+        >
+          Đã hoàn thành ({doneCount})
         </button>
         <button
           type="button"
@@ -372,18 +478,7 @@ export default function TasksPage() {
             setPage(1);
           }}
         >
-          Việc khẩn cấp ({stats?.urgent ?? 0})
-        </button>
-        <button
-          type="button"
-          className={`nx-tk-chip${sla === 'soon' ? ' active' : ''}`}
-          onClick={() => {
-            setSla('soon');
-            setScope('');
-            setPage(1);
-          }}
-        >
-          Sắp quá hạn SLA ({stats?.soonSla ?? 0})
+          Khẩn cấp P0 ({stats?.urgent ?? 0})
         </button>
       </div>
 
@@ -403,71 +498,140 @@ export default function TasksPage() {
                     onChange={(e) => toggleAll(e.target.checked)}
                   />
                 </th>
-                <th>Mã &amp; tiêu đề</th>
-                <th>Phòng ban / Dự án</th>
+                <th>Mã &amp; tên công việc</th>
                 <th>Người thực hiện</th>
-                <th>Ưu tiên</th>
+                <th>Bắt đầu</th>
+                <th>Hạn hoàn thành</th>
                 <th>Trạng thái</th>
+                <th>Thao tác</th>
               </tr>
             </thead>
             <tbody>
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={6} style={{ textAlign: 'center', color: '#7a8a85' }}>
+                  <td colSpan={7} style={{ textAlign: 'center', color: '#7a8a85' }}>
                     Không có công việc
                   </td>
                 </tr>
               )}
-              {items.map((t) => (
-                <tr key={t.id} onClick={() => navigate(`/tasks/${t.id}`)}>
-                  <td onClick={(e) => e.stopPropagation()}>
-                    <input
-                      type="checkbox"
-                      checked={selected.includes(t.id)}
-                      onChange={(e) => toggleOne(t.id, e.target.checked)}
-                    />
-                  </td>
-                  <td>
-                    <div className="nx-tk-title">
-                      <span className="nx-tk-code">{t.taskCode}</span>
-                      <strong>{t.title}</strong>
-                      {t.description && <div className="desc">{t.description}</div>}
-                    </div>
-                  </td>
-                  <td className="nx-tk-dept">
-                    <strong>{t.department?.name || '—'}</strong>
-                    <span>{t.projectName || '—'}</span>
-                  </td>
-                  <td>
-                    {t.assignee ? (
-                      <div className="nx-tk-who">
-                        <div className="nx-tk-av">{initials(t.assignee.fullName)}</div>
-                        <div>
-                          <strong>{t.assignee.fullName}</strong>
-                          <span>{t.assignee.position || t.assignee.employeeCode}</span>
+              {items.map((t) => {
+                const hint = dueLabel(t.dueDate, t.sla);
+                return (
+                  <tr key={t.id}>
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={selected.includes(t.id)}
+                        onChange={(e) => toggleOne(t.id, e.target.checked)}
+                      />
+                    </td>
+                    <td>
+                      <div className="nx-tk-title">
+                        <span className="nx-tk-code">
+                          {t.taskCode}
+                          <em className={`nx-tk-pri ${priClass(t.priority)}`}>
+                            {t.priority === 'URGENT'
+                              ? 'P0'
+                              : t.priority === 'HIGH'
+                                ? 'P1'
+                                : t.priority === 'LOW'
+                                  ? 'P3'
+                                  : 'P2'}
+                          </em>
+                        </span>
+                        <strong>{t.title}</strong>
+                        <div className="desc">
+                          {t.projectName || t.department?.name || '—'}
                         </div>
                       </div>
-                    ) : (
-                      <span style={{ color: '#7a8a85' }}>—</span>
-                    )}
-                  </td>
-                  <td>
-                    <span className={`nx-tk-pri ${priClass(t.priority)}`}>
-                      {PRI[t.priority] || t.priority}
-                    </span>
-                  </td>
-                  <td>
-                    <span className={`nx-tk-st ${stClass(t.status)}`}>
-                      {ST[t.status] || t.status}
-                    </span>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                    <td>
+                      {t.assignee ? (
+                        <div className="nx-tk-who">
+                          <div className="nx-tk-av">
+                            {initials(t.assignee.fullName)}
+                          </div>
+                          <div>
+                            <strong>{t.assignee.fullName}</strong>
+                            <span>
+                              {t.assignee.position || t.assignee.employeeCode}
+                            </span>
+                          </div>
+                        </div>
+                      ) : (
+                        <span style={{ color: '#7a8a85' }}>—</span>
+                      )}
+                    </td>
+                    <td>{fmtDate(t.startDate)}</td>
+                    <td>
+                      <strong>{fmtDate(t.dueDate)}</strong>
+                      {hint && (
+                        <div
+                          style={{
+                            fontSize: '0.72rem',
+                            fontWeight: 700,
+                            color:
+                              t.sla === 'overdue' ? '#c62828' : '#e65100',
+                          }}
+                        >
+                          {hint}
+                        </div>
+                      )}
+                    </td>
+                    <td>
+                      <span className={`nx-tk-st ${stClass(t.status)}`}>
+                        {t.status === 'DONE'
+                          ? 'DONE'
+                          : t.status === 'TODO'
+                            ? 'TODO'
+                            : ST[t.status] || t.status}
+                      </span>
+                    </td>
+                    <td>
+                      <div className="nx-tk-row-acts">
+                        <Link
+                          to={`/tasks/${t.id}`}
+                          className="nx-icon-act"
+                          title="Xem"
+                          aria-label={`Xem ${t.taskCode}`}
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z" />
+                            <circle cx="12" cy="12" r="3" />
+                          </svg>
+                          <span className="visually-hidden">Xem</span>
+                        </Link>
+                        <Link
+                          to={`/tasks/${t.id}`}
+                          className="nx-btn-outline"
+                          style={{ padding: '0.25rem 0.55rem', fontSize: '0.75rem' }}
+                        >
+                          Chi tiết
+                        </Link>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
           <div className="nx-tk-pager">
             <div>
-              Đang chọn: {selected.length} · Tổng {total} công việc
+              Hiển thị {(page - 1) * pageSize + (total ? 1 : 0)}–
+              {Math.min(page * pageSize, total)} trong tổng số {total} công việc
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <select
+                value={pageSize}
+                onChange={(e) => {
+                  setPage(1);
+                  setPageSize(Number(e.target.value));
+                }}
+              >
+                <option value={8}>8 / trang</option>
+                <option value={10}>10 / trang</option>
+                <option value={25}>25 / trang</option>
+              </select>
             </div>
             <div className="btns">
               <button type="button" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>

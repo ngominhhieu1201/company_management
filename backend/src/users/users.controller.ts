@@ -18,69 +18,95 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import {
   CreateUserDto,
   ListUsersQueryDto,
+  UnlockRequestDto,
   UpdateUserDto,
 } from './dto/user.dto';
-import { UsersService } from './users.service';
+import { AuthUser, UsersService } from './users.service';
 
 @ApiTags('users')
 @ApiCookieAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.ADMIN)
 @Controller('users')
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Get('stats')
-  stats() {
-    return this.usersService.stats();
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
+  stats(@CurrentUser() user: AuthUser) {
+    return this.usersService.stats(user);
   }
 
   @Get('check-username')
+  @Roles(UserRole.ADMIN)
   checkUsername(@Query('username') username: string) {
     return this.usersService.checkUsername(username ?? '');
   }
 
   @Get('unlinked-employees')
+  @Roles(UserRole.ADMIN)
   unlinkedEmployees() {
     return this.usersService.listUnlinkedEmployees();
   }
 
   @Get()
-  findAll(@Query() query: ListUsersQueryDto) {
-    return this.usersService.findAll(query);
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
+  findAll(
+    @Query() query: ListUsersQueryDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.usersService.findAll(query, user);
   }
 
   @Get(':id/audit')
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
   audit(
     @Param('id', ParseIntPipe) id: number,
     @Query('limit') limit?: string,
+    @CurrentUser() user?: AuthUser,
   ) {
-    return this.usersService.audit(id, limit ? Number(limit) : 50);
+    return this.usersService.audit(id, limit ? Number(limit) : 50, user);
+  }
+
+  @Post(':id/unlock-request')
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
+  unlockRequest(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UnlockRequestDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.usersService.requestUnlock(id, user, dto);
   }
 
   @Get(':id')
-  findOne(@Param('id', ParseIntPipe) id: number) {
-    return this.usersService.findDetail(id);
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
+  findOne(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.usersService.findDetail(id, user);
   }
 
   @Post()
-  create(@Body() dto: CreateUserDto, @CurrentUser() user: { id: number }) {
+  @Roles(UserRole.ADMIN)
+  create(@Body() dto: CreateUserDto, @CurrentUser() user: AuthUser) {
     return this.usersService.create(dto, user.id);
   }
 
   @Post(':id/reset-password')
+  @Roles(UserRole.ADMIN)
   resetPassword(
     @Param('id', ParseIntPipe) id: number,
-    @CurrentUser() user: { id: number },
+    @CurrentUser() user: AuthUser,
   ) {
     return this.usersService.resetPassword(id, user.id);
   }
 
   @Patch(':id')
+  @Roles(UserRole.ADMIN)
   update(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateUserDto,
-    @CurrentUser() user: { id: number },
+    @CurrentUser() user: AuthUser,
   ) {
     return this.usersService.update(id, dto, user.id);
   }

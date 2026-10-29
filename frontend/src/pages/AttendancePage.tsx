@@ -27,10 +27,18 @@ type Row = {
 type Stats = {
   date: string;
   total: number;
+  headcount: number;
+  present: number;
+  presentRate: number | null;
   onTime: number;
   late: number;
   onTimeRate: number | null;
+  inProgress: number;
+  completed: number;
+  anomalies: number;
+  needReview: number;
   flagged: number;
+  flaggedToday?: number;
   allTimeTotal: number;
 };
 
@@ -44,13 +52,13 @@ function timeOnly(iso: string | null) {
   if (!iso) return '—';
   const d = new Date(iso);
   const p = (n: number) => String(n).padStart(2, '0');
-  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  return `${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 function fmtDur(mins: number | null) {
   if (mins == null) return '—';
   const h = Math.floor(mins / 60);
   const m = mins % 60;
-  return `Đủ ${h}h${String(m).padStart(2, '0')}m`;
+  return `${h}h${String(m).padStart(2, '0')}m`;
 }
 function todayLocal() {
   const d = new Date();
@@ -74,10 +82,21 @@ function exportCsv(rows: Row[]) {
   URL.revokeObjectURL(url);
 }
 
+function statusPill(r: Row) {
+  if (r.flagged) return { cls: 'flag', label: 'Cần đối soát' };
+  if (r.status === 'IN_PROGRESS') return { cls: 'prog', label: 'Đang làm việc' };
+  if (r.punctuality === 'LATE') return { cls: 'late', label: 'Đi muộn' };
+  if (r.status === 'COMPLETED') return { cls: 'on', label: 'Hoàn tất ca' };
+  return { cls: 'muted', label: 'Chưa chấm' };
+}
+
 export default function AttendancePage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const videoRef = useRef<HTMLVideoElement>(null);
+  const isManagerView = user?.role === 'ADMIN' || user?.role === 'MANAGER';
+  const isAdmin = user?.role === 'ADMIN';
+
   const [items, setItems] = useState<Row[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [today, setToday] = useState<Row | null>(null);
@@ -88,11 +107,12 @@ export default function AttendancePage() {
   const [error, setError] = useState('');
   const [msg, setMsg] = useState('');
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
 
   const [qDraft, setQDraft] = useState('');
   const [q, setQ] = useState('');
   const [date, setDate] = useState(todayLocal());
-  const [punctuality, setPunctuality] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
   const [departmentId, setDepartmentId] = useState('');
   const [chip, setChip] = useState('all');
 
@@ -110,10 +130,23 @@ export default function AttendancePage() {
     };
     if (q) params.q = q;
     if (departmentId) params.departmentId = Number(departmentId);
-    if (chip === 'late' || punctuality === 'LATE') params.punctuality = 'LATE';
-    else if (chip === 'ontime' || punctuality === 'ON_TIME') params.punctuality = 'ON_TIME';
-    else if (punctuality) params.punctuality = punctuality;
-    if (chip === 'flag') params.flagged = '1';
+
+    if (isManagerView) {
+      if (chip === 'inprogress') params.status = 'IN_PROGRESS';
+      else if (chip === 'completed') params.status = 'COMPLETED';
+      else if (chip === 'anomalies') params.anomalies = '1';
+      else if (statusFilter === 'IN_PROGRESS') params.status = 'IN_PROGRESS';
+      else if (statusFilter === 'COMPLETED') params.status = 'COMPLETED';
+      else if (statusFilter === 'LATE') params.punctuality = 'LATE';
+      else if (statusFilter === 'ANOMALIES') params.anomalies = '1';
+    } else {
+      if (chip === 'late') params.punctuality = 'LATE';
+      else if (chip === 'ontime') params.punctuality = 'ON_TIME';
+      else if (chip === 'flag') params.flagged = '1';
+      else if (statusFilter === 'ON_TIME') params.punctuality = 'ON_TIME';
+      else if (statusFilter === 'LATE') params.punctuality = 'LATE';
+      else if (statusFilter === 'IN_PROGRESS') params.punctuality = 'IN_PROGRESS';
+    }
 
     const [s, list, t] = await Promise.all([
       api.get<Stats>('/attendance/stats', { params: { date } }),
@@ -125,7 +158,7 @@ export default function AttendancePage() {
     setTotal(list.data.total);
     setTotalPages(list.data.totalPages);
     setToday(t.data);
-  }, [page, date, q, departmentId, punctuality, chip]);
+  }, [page, date, q, departmentId, statusFilter, chip, isManagerView]);
 
   useEffect(() => {
     let c = false;
@@ -146,8 +179,10 @@ export default function AttendancePage() {
   }, [load]);
 
   useEffect(() => {
-    api.get('/departments').then((r) => setDepts(r.data)).catch(() => undefined);
-  }, []);
+    if (isAdmin) {
+      api.get('/departments').then((r) => setDepts(r.data)).catch(() => undefined);
+    }
+  }, [isAdmin]);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -158,6 +193,19 @@ export default function AttendancePage() {
   }, [qDraft]);
 
   useEffect(() => () => stream?.getTracks().forEach((t) => t.stop()), [stream]);
+
+  async function syncReload() {
+    setSyncing(true);
+    try {
+      await load();
+      setMsg('Đã đồng bộ dữ liệu chấm công');
+      setTimeout(() => setMsg(''), 2500);
+    } catch {
+      setError('Đồng bộ thất bại');
+    } finally {
+      setSyncing(false);
+    }
+  }
 
   async function startCamera(next: 'in' | 'out') {
     setError('');
@@ -222,129 +270,291 @@ export default function AttendancePage() {
     }
   }
 
-  const canIn = user?.employeeId && !today;
-  const canOut = today && today.status === 'IN_PROGRESS';
+  const canIn = !isManagerView && user?.employeeId && !today;
+  const canOut = !isManagerView && today && today.status === 'IN_PROGRESS';
+
+  const employeeCheckIn = !isManagerView && user?.employeeId && (
+    <div className="nx-att-check">
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+        <div>
+          <strong>Chấm công hôm nay</strong>
+          <div style={{ fontSize: '.85rem', color: '#7a8a85' }}>
+            {today
+              ? `Vào ${timeOnly(today.checkInTime)} · ${today.status === 'IN_PROGRESS' ? 'Đang trong ca' : `Ra ${timeOnly(today.checkOutTime)}`}`
+              : 'Chưa check-in'}
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button type="button" className="nx-btn-primary" disabled={!canIn || !!mode} onClick={() => void startCamera('in')}>
+            Check-in
+          </button>
+          <button type="button" className="nx-btn-outline" disabled={!canOut || !!mode} onClick={() => void startCamera('out')}>
+            Check-out
+          </button>
+        </div>
+      </div>
+      {mode && (
+        <div style={{ marginTop: 12 }}>
+          {!preview ? (
+            <video ref={videoRef} playsInline muted />
+          ) : (
+            <img src={preview} alt="preview" />
+          )}
+          <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+            {!preview && (
+              <button type="button" className="nx-btn-outline" onClick={capture}>
+                Chụp ảnh
+              </button>
+            )}
+            {preview && (
+              <button type="button" className="nx-btn-primary" disabled={busy} onClick={() => void confirm()}>
+                {busy ? 'Đang gửi…' : 'Xác nhận'}
+              </button>
+            )}
+            <button
+              type="button"
+              className="ghost"
+              style={{ border: 0, background: 'transparent', fontWeight: 700, color: '#7a8a85' }}
+              onClick={() => {
+                stream?.getTracks().forEach((t) => t.stop());
+                setStream(null);
+                setMode(null);
+              }}
+            >
+              Hủy
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div>
       <div className="nx-att-crumb">
         <span>Quản trị hệ thống</span>
         <span>›</span>
-        <span>Lịch sử chấm công</span>
+        <span>{isManagerView ? 'Quản lý chấm công' : 'Lịch sử chấm công'}</span>
       </div>
       <div className="nx-att-head">
-        <h1>Lịch sử chấm công ca làm việc toàn doanh nghiệp</h1>
-        <button type="button" className="nx-btn-primary" onClick={() => exportCsv(items)}>
-          Xuất báo cáo Excel
-        </button>
+        <h1>{isManagerView ? 'Quản Lý & Theo Dõi Chấm Công' : 'Lịch sử chấm công ca làm việc'}</h1>
+        <div className="nx-att-head-actions">
+          {isManagerView && (
+            <button type="button" className="nx-btn-outline" disabled={syncing} onClick={() => void syncReload()}>
+              {syncing ? 'Đang đồng bộ…' : 'Đồng bộ'}
+            </button>
+          )}
+          <button type="button" className="nx-btn-primary" onClick={() => exportCsv(items)}>
+            Xuất Excel
+          </button>
+        </div>
       </div>
 
       {error && <Alert variant="danger" dismissible onClose={() => setError('')}>{error}</Alert>}
       {msg && <Alert variant="success">{msg}</Alert>}
 
-      {user?.employeeId && (
-        <div className="nx-att-check">
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-            <div>
-              <strong>Chấm công hôm nay</strong>
-              <div style={{ fontSize: '.85rem', color: '#7a8a85' }}>
-                {today
-                  ? `Vào ${timeOnly(today.checkInTime)} · ${today.status === 'IN_PROGRESS' ? 'Đang trong ca' : `Ra ${timeOnly(today.checkOutTime)}`}`
-                  : 'Chưa check-in'}
-              </div>
+      {employeeCheckIn}
+
+      {stats && isManagerView && (
+        <div className="nx-att-kpis nx-att-kpis-4">
+          <div className="nx-att-kpi scope">
+            <div className="label">Quy mô</div>
+            <div className="value">
+              {stats.present}/{stats.headcount}
             </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button type="button" className="nx-btn-primary" disabled={!canIn || !!mode} onClick={() => void startCamera('in')}>
-                Check-in
-              </button>
-              <button type="button" className="nx-btn-outline" disabled={!canOut || !!mode} onClick={() => void startCamera('out')}>
-                Check-out
-              </button>
-            </div>
+            <div className="sub">{stats.total} bản ghi · {stats.date}</div>
           </div>
-          {mode && (
-            <div style={{ marginTop: 12 }}>
-              {!preview ? (
-                <video ref={videoRef} playsInline muted />
-              ) : (
-                <img src={preview} alt="preview" />
-              )}
-              <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-                {!preview && (
-                  <button type="button" className="nx-btn-outline" onClick={capture}>
-                    Chụp ảnh
-                  </button>
-                )}
-                {preview && (
-                  <button type="button" className="nx-btn-primary" disabled={busy} onClick={() => void confirm()}>
-                    {busy ? 'Đang gửi…' : 'Xác nhận'}
-                  </button>
-                )}
-                <button
-                  type="button"
-                  className="ghost"
-                  style={{ border: 0, background: 'transparent', fontWeight: 700, color: '#7a8a85' }}
-                  onClick={() => {
-                    stream?.getTracks().forEach((t) => t.stop());
-                    setStream(null);
-                    setMode(null);
-                  }}
-                >
-                  Hủy
-                </button>
-              </div>
-            </div>
-          )}
+          <div className="nx-att-kpi on">
+            <div className="label">Có mặt hôm nay</div>
+            <div className="value">{stats.presentRate != null ? `${stats.presentRate}%` : '—'}</div>
+            <div className="sub">{stats.present} nhân sự đã check-in</div>
+          </div>
+          <div className="nx-att-kpi prog">
+            <div className="label">Đang làm việc</div>
+            <div className="value">{stats.inProgress}</div>
+            <div className="sub">Ca chưa check-out</div>
+          </div>
+          <div className="nx-att-kpi late">
+            <div className="label">Bất thường</div>
+            <div className="value">{stats.anomalies}</div>
+            <div className="sub">Muộn hoặc cần đối soát</div>
+          </div>
         </div>
       )}
 
-      {stats && (
+      {stats && !isManagerView && (
         <div className="nx-att-kpis">
           <div className="nx-att-kpi on">
             <div className="label">Tỷ lệ đúng giờ</div>
             <div className="value">{stats.onTimeRate != null ? `${stats.onTimeRate}%` : '—'}</div>
-            <div style={{ fontSize: '.75rem', color: '#7a8a85' }}>{stats.onTime}/{stats.total} lượt · {stats.date}</div>
+            <div className="sub">{stats.onTime}/{stats.total} lượt · {stats.date}</div>
           </div>
           <div className="nx-att-kpi late">
             <div className="label">Đi muộn / cần giải trình</div>
             <div className="value">{stats.late} lượt</div>
-            <div style={{ fontSize: '.75rem', color: '#7a8a85' }}>Gắn cờ: {stats.flagged}</div>
+            <div className="sub">Gắn cờ: {stats.flagged}</div>
           </div>
         </div>
       )}
 
       <div className="nx-att-filters">
         <label className="search">
-          <input value={qDraft} onChange={(e) => setQDraft(e.target.value)} placeholder="Tìm mã NV, họ tên, phòng ban, #ATT…" />
+          <input
+            value={qDraft}
+            onChange={(e) => setQDraft(e.target.value)}
+            placeholder={isManagerView ? 'Tìm họ tên, mã NV, phòng ban…' : 'Tìm mã NV, họ tên, phòng ban, #ATT…'}
+          />
         </label>
         <input className="nx-att-date" type="date" value={date} onChange={(e) => { setDate(e.target.value); setPage(1); }} />
-        <select value={departmentId} onChange={(e) => { setDepartmentId(e.target.value); setPage(1); }}>
-          <option value="">Tất cả phòng ban</option>
-          {depts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-        </select>
-        <select value={punctuality} onChange={(e) => { setPunctuality(e.target.value); setChip('all'); setPage(1); }}>
+        {isAdmin && (
+          <select value={departmentId} onChange={(e) => { setDepartmentId(e.target.value); setPage(1); }}>
+            <option value="">Tất cả phòng ban</option>
+            {depts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+          </select>
+        )}
+        <select
+          value={statusFilter}
+          onChange={(e) => {
+            setStatusFilter(e.target.value);
+            setChip('all');
+            setPage(1);
+          }}
+        >
           <option value="">Tất cả trạng thái</option>
-          <option value="ON_TIME">Đúng giờ</option>
-          <option value="LATE">Đi muộn</option>
-          <option value="IN_PROGRESS">Đang trong ca</option>
+          {isManagerView ? (
+            <>
+              <option value="IN_PROGRESS">Đang làm việc</option>
+              <option value="COMPLETED">Hoàn tất ca</option>
+              <option value="LATE">Đi muộn</option>
+              <option value="ANOMALIES">Bất thường</option>
+            </>
+          ) : (
+            <>
+              <option value="ON_TIME">Đúng giờ</option>
+              <option value="LATE">Đi muộn</option>
+              <option value="IN_PROGRESS">Đang trong ca</option>
+            </>
+          )}
         </select>
       </div>
 
       <div className="nx-att-chips">
-        {[
-          ['all', `Tất cả (${stats?.total ?? 0})`],
-          ['ontime', `Đúng giờ (${stats?.onTime ?? 0})`],
-          ['late', `Đi muộn (${stats?.late ?? 0})`],
-          ['flag', `Cần đối soát (${stats?.flagged ?? 0})`],
-        ].map(([k, label]) => (
-          <button key={k} type="button" className={`nx-att-chip${chip === k ? ' active' : ''}`} onClick={() => { setChip(k); setPunctuality(''); setPage(1); }}>
-            {label}
-          </button>
-        ))}
+        {isManagerView
+          ? [
+              ['all', `Tất cả (${stats?.total ?? 0})`],
+              ['inprogress', `Đang làm việc (${stats?.inProgress ?? 0})`],
+              ['completed', `Hoàn tất ca (${stats?.completed ?? 0})`],
+              ['anomalies', `Bất thường (${stats?.anomalies ?? 0})`],
+            ].map(([k, label]) => (
+              <button
+                key={k}
+                type="button"
+                className={`nx-att-chip${chip === k ? ' active' : ''}`}
+                onClick={() => {
+                  setChip(k);
+                  setStatusFilter('');
+                  setPage(1);
+                }}
+              >
+                {label}
+              </button>
+            ))
+          : [
+              ['all', `Tất cả (${stats?.total ?? 0})`],
+              ['ontime', `Đúng giờ (${stats?.onTime ?? 0})`],
+              ['late', `Đi muộn (${stats?.late ?? 0})`],
+              ['flag', `Cần đối soát (${stats?.flagged ?? 0})`],
+            ].map(([k, label]) => (
+              <button
+                key={k}
+                type="button"
+                className={`nx-att-chip${chip === k ? ' active' : ''}`}
+                onClick={() => {
+                  setChip(k);
+                  setStatusFilter('');
+                  setPage(1);
+                }}
+              >
+                {label}
+              </button>
+            ))}
       </div>
 
       {loading ? (
         <div className="py-5 text-center"><Spinner size="sm" animation="border" /></div>
+      ) : isManagerView ? (
+        <div className="nx-att-wrap">
+          <table className="nx-att-table nx-att-table-mgr">
+            <thead>
+              <tr>
+                <th>Nhân viên</th>
+                <th>Nhóm / Ca</th>
+                <th>Check-in</th>
+                <th>Check-out</th>
+                <th>Tích lũy</th>
+                <th>Địa điểm</th>
+                <th>Trạng thái</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {items.length === 0 && (
+                <tr><td colSpan={8} className="nx-att-empty">Không có bản ghi</td></tr>
+              )}
+              {items.map((r) => {
+                const st = statusPill(r);
+                return (
+                  <tr key={r.id}>
+                    <td>
+                      {r.employee ? (
+                        <div className="nx-att-who">
+                          <div className="nx-att-av">{initials(r.employee.fullName)}</div>
+                          <div>
+                            <strong>{r.employee.fullName}</strong>
+                            <span>{r.employee.employeeCode}</span>
+                          </div>
+                        </div>
+                      ) : '—'}
+                    </td>
+                    <td>
+                      <strong className="nx-att-shift-title">{r.employee?.position || r.department?.name || '—'}</strong>
+                      <span className="nx-att-shift-sub">{r.shiftLabel} · {r.shiftStart}–{r.shiftEnd}</span>
+                    </td>
+                    <td>
+                      <div className={r.punctuality === 'LATE' ? 'nx-att-time warn' : r.checkInTime ? 'nx-att-time ok' : ''}>
+                        {timeOnly(r.checkInTime)}
+                      </div>
+                      {r.punctuality === 'LATE' && r.lateMinutes != null && (
+                        <span className="nx-att-tag late">Muộn {r.lateMinutes}p</span>
+                      )}
+                      {r.punctuality === 'EARLY' && r.earlyMinutes != null && (
+                        <span className="nx-att-tag early">Sớm {r.earlyMinutes}p</span>
+                      )}
+                    </td>
+                    <td>{r.status === 'IN_PROGRESS' ? '—' : timeOnly(r.checkOutTime)}</td>
+                    <td>{fmtDur(r.workMinutes)}</td>
+                    <td className="nx-att-muted">—</td>
+                    <td>
+                      <span className={`nx-att-st ${st.cls}`}>{st.label}</span>
+                    </td>
+                    <td className="nx-att-detail">
+                      <Link to={`/attendance/${r.id}`} onClick={(e) => e.stopPropagation()}>
+                        Chi tiết
+                      </Link>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <div className="nx-att-pager">
+            <div>Hiển thị trang {page}/{totalPages} · {total} bản ghi</div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button type="button" className="nx-btn-outline" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>‹</button>
+              <button type="button" className="nx-btn-outline" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>›</button>
+            </div>
+          </div>
+        </div>
       ) : (
         <div className="nx-att-wrap">
           <table className="nx-att-table">
@@ -361,7 +571,7 @@ export default function AttendancePage() {
             </thead>
             <tbody>
               {items.length === 0 && (
-                <tr><td colSpan={7} style={{ textAlign: 'center', color: '#7a8a85' }}>Không có bản ghi</td></tr>
+                <tr><td colSpan={7} className="nx-att-empty">Không có bản ghi</td></tr>
               )}
               {items.map((r) => (
                 <tr key={r.id} onClick={() => navigate(`/attendance/${r.id}`)}>
@@ -421,9 +631,6 @@ export default function AttendancePage() {
           </div>
         </div>
       )}
-      <div style={{ marginTop: 12 }}>
-        <Link to="/attendance" style={{ display: 'none' }} />
-      </div>
     </div>
   );
 }

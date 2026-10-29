@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Modal, Spinner } from 'react-bootstrap';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import api from '../api/client';
+import { useAuth } from '../contexts/AuthContext';
 import '../styles/user-detail.css';
 
 type Emp = {
@@ -78,6 +79,8 @@ function actionLabel(action: string) {
     USER_ROLE_CHANGE: 'ĐỔI VAI TRÒ',
     USER_STATUS_CHANGE: 'ĐỔI TRẠNG THÁI',
     USER_RESET_PASSWORD: 'ĐẶT LẠI MẬT KHẨU',
+    USER_UNLOCK_REQUEST: 'YÊU CẦU MỞ KHÓA',
+    USER_CHANGE_PASSWORD: 'ĐỔI MẬT KHẨU',
   };
   return map[action] || action;
 }
@@ -93,6 +96,9 @@ function roleDesc(role: string) {
 export default function UserDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { user: authUser } = useAuth();
+  const isAdmin = authUser?.role === 'ADMIN';
+  const isManager = authUser?.role === 'MANAGER';
   const [detail, setDetail] = useState<Detail | null>(null);
   const [audit, setAudit] = useState<AuditRow[]>([]);
   const [role, setRole] = useState<'ADMIN' | 'MANAGER' | 'EMPLOYEE'>('EMPLOYEE');
@@ -102,6 +108,10 @@ export default function UserDetailPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [tempPass, setTempPass] = useState<string | null>(null);
+  const [unlockReason, setUnlockReason] = useState('');
+  const [unlockUrgency, setUnlockUrgency] = useState('NORMAL');
+  const [unlockConfirm, setUnlockConfirm] = useState(false);
+  const [ticketCode, setTicketCode] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -215,6 +225,34 @@ export default function UserDetailPage() {
     }
   }
 
+  async function submitUnlockRequest() {
+    if (!detail) return;
+    if (unlockReason.trim().length < 3) {
+      setError('Nhập lý do yêu cầu mở khóa (≥ 3 ký tự)');
+      return;
+    }
+    if (!unlockConfirm) {
+      setError('Vui lòng xác nhận thông tin trước khi gửi');
+      return;
+    }
+    setSaving(true);
+    try {
+      const { data } = await api.post(`/users/${detail.id}/unlock-request`, {
+        reason: unlockReason.trim(),
+        urgency: unlockUrgency,
+      });
+      setTicketCode(data.ticketCode as string);
+      setUnlockReason('');
+      setUnlockConfirm(false);
+      setOkMsg(`Đã gửi yêu cầu mở khóa — mã ${data.ticketCode}`);
+      await load();
+    } catch {
+      setError('Gửi yêu cầu mở khóa thất bại');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function resetPassword() {
     if (!detail) return;
     setSaving(true);
@@ -262,7 +300,11 @@ export default function UserDetailPage() {
         </span>
       </nav>
 
-      <h1 className="nx-ud-title">Chi tiết &amp; Cập Nhật Tài Khoản</h1>
+      <h1 className="nx-ud-title">
+        {isManager
+          ? 'Chi tiết tài khoản nhân sự'
+          : 'Chi tiết & Cập Nhật Tài Khoản'}
+      </h1>
 
       {error && (
         <Alert variant="danger" dismissible onClose={() => setError('')}>
@@ -325,28 +367,30 @@ export default function UserDetailPage() {
               </span>
             </div>
 
-            <div className="nx-ud-actions">
-              <button
-                type="button"
-                className="nx-ud-btn-blue"
-                disabled={saving}
-                onClick={() => void resetPassword()}
-              >
-                Đặt lại mật khẩu tạm thời
-              </button>
-              <button
-                type="button"
-                className={
-                  detail.status === 'ACTIVE' ? 'nx-ud-btn-danger' : 'nx-ud-btn-ok'
-                }
-                disabled={saving}
-                onClick={() => void toggleLock()}
-              >
-                {detail.status === 'ACTIVE'
-                  ? 'Khóa tài khoản (LOCK)'
-                  : 'Mở khóa tài khoản'}
-              </button>
-            </div>
+            {isAdmin && (
+              <div className="nx-ud-actions">
+                <button
+                  type="button"
+                  className="nx-ud-btn-blue"
+                  disabled={saving}
+                  onClick={() => void resetPassword()}
+                >
+                  Đặt lại mật khẩu tạm thời
+                </button>
+                <button
+                  type="button"
+                  className={
+                    detail.status === 'ACTIVE' ? 'nx-ud-btn-danger' : 'nx-ud-btn-ok'
+                  }
+                  disabled={saving}
+                  onClick={() => void toggleLock()}
+                >
+                  {detail.status === 'ACTIVE'
+                    ? 'Khóa tài khoản (LOCK)'
+                    : 'Mở khóa tài khoản'}
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="nx-ud-card nx-ud-stats">
@@ -371,6 +415,76 @@ export default function UserDetailPage() {
         </aside>
 
         <div className="nx-ud-main">
+          {isManager && detail.status === 'LOCKED' && (
+            <section className="nx-ud-card nx-ud-unlock-req">
+              <h3>Yêu cầu mở khóa tài khoản</h3>
+              <p className="text-muted" style={{ fontSize: '0.85rem' }}>
+                Yêu cầu được ghi nhận trong audit — Admin xử lý mở khóa. Hệ thống
+                không tự mở khóa tài khoản.
+              </p>
+              {ticketCode && (
+                <Alert variant="info">
+                  Mã phiếu gần nhất: <strong>{ticketCode}</strong>
+                </Alert>
+              )}
+              <div className="nx-ud-reason">
+                <label htmlFor="unlock-reason">Lý do yêu cầu</label>
+                <textarea
+                  id="unlock-reason"
+                  value={unlockReason}
+                  onChange={(e) => setUnlockReason(e.target.value)}
+                  placeholder="Mô tả ngắn lý do nhân sự cần truy cập lại hệ thống…"
+                />
+              </div>
+              <div style={{ marginTop: '0.75rem' }}>
+                <label htmlFor="unlock-urgency" style={{ fontWeight: 700, fontSize: '0.82rem' }}>
+                  Mức độ ưu tiên
+                </label>
+                <select
+                  id="unlock-urgency"
+                  value={unlockUrgency}
+                  onChange={(e) => setUnlockUrgency(e.target.value)}
+                  style={{ display: 'block', width: '100%', marginTop: 6, padding: '0.55rem' }}
+                >
+                  <option value="LOW">Thấp</option>
+                  <option value="NORMAL">Bình thường</option>
+                  <option value="HIGH">Cao</option>
+                  <option value="URGENT">Khẩn cấp</option>
+                </select>
+              </div>
+              <label className="nx-ud-unlock-check" style={{ marginTop: '0.85rem' }}>
+                <input
+                  type="checkbox"
+                  checked={unlockConfirm}
+                  onChange={(e) => setUnlockConfirm(e.target.checked)}
+                />
+                Tôi xác nhận thông tin chính xác và đã trao đổi với nhân sự liên quan
+              </label>
+              <div style={{ marginTop: '0.85rem' }}>
+                <button
+                  type="button"
+                  className="nx-btn-primary"
+                  disabled={saving}
+                  onClick={() => void submitUnlockRequest()}
+                >
+                  Gửi yêu cầu mở khóa
+                </button>
+              </div>
+            </section>
+          )}
+
+          {isManager && detail.status === 'ACTIVE' && (
+            <section className="nx-ud-card">
+              <h3>Quyền hạn áp dụng</h3>
+              <ul className="nx-ud-perms">
+                {detail.permissions.map((p) => (
+                  <li key={p}>{p}</li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {isAdmin && (
           <section className="nx-ud-card">
             <h3>Cập nhật Vai trò &amp; Quyền hạn (RBAC)</h3>
             <div className="nx-ud-roles">
@@ -420,6 +534,7 @@ export default function UserDetailPage() {
               </button>
             </div>
           </section>
+          )}
 
           <section className="nx-ud-card">
             <h3>Trạng thái phiên đăng nhập</h3>
@@ -500,26 +615,30 @@ export default function UserDetailPage() {
         <Link to="/users" className="nx-btn-outline">
           Quay lại danh sách tài khoản
         </Link>
-        <div className="spacer" />
-        <button
-          type="button"
-          className="nx-btn-outline"
-          onClick={() => {
-            setRole(detail.role);
-            setReason('');
-            navigate('/users');
-          }}
-        >
-          Hủy thao tác
-        </button>
-        <button
-          type="button"
-          className="nx-btn-primary"
-          disabled={saving}
-          onClick={() => void saveAll()}
-        >
-          Lưu tất cả thay đổi
-        </button>
+        {isAdmin && (
+          <>
+            <div className="spacer" />
+            <button
+              type="button"
+              className="nx-btn-outline"
+              onClick={() => {
+                setRole(detail.role);
+                setReason('');
+                navigate('/users');
+              }}
+            >
+              Hủy thao tác
+            </button>
+            <button
+              type="button"
+              className="nx-btn-primary"
+              disabled={saving}
+              onClick={() => void saveAll()}
+            >
+              Lưu tất cả thay đổi
+            </button>
+          </>
+        )}
       </div>
 
       <Modal show={!!tempPass} onHide={() => setTempPass(null)} centered>

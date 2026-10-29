@@ -305,18 +305,20 @@ def main():
         except Exception as e:
             log(f"Bad login: {e}", False)
 
-        # Manager login scope
+        # Manager login scope (scoped accounts list allowed; create user still admin-only)
         try:
             login(driver, "manager", "Manager@123")
             log("Manager login", True)
             assert_page(driver, "/dashboard", ["tổng quan", "dashboard"], "Manager dashboard")
             driver.get(f"{BASE}/users")
             time.sleep(0.8)
-            # manager should not manage users — redirect or forbidden UI
             body = driver.find_element(By.TAG_NAME, "body").text.lower()
-            blocked = "/users" not in driver.current_url or "không có quyền" in body or "forbidden" in body or "đăng nhập" in driver.current_url
-            # if page loads empty with no create — still note
-            log("Manager users access restricted (UI)", blocked or "tạo tài khoản" not in body)
+            on_users = "/users" in driver.current_url and "/login" not in driver.current_url
+            log("Manager users list allowed (scoped)", on_users and ("tài khoản" in body or "username" in body))
+            driver.get(f"{BASE}/users/new")
+            time.sleep(0.8)
+            blocked_create = "/users/new" not in driver.current_url
+            log("Manager user-create blocked (admin-only)", blocked_create)
         except Exception as e:
             log(f"Manager flow: {e}", False)
 

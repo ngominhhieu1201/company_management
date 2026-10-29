@@ -11,11 +11,28 @@ export enum AccountStatus {
 
 export enum EmployeeStatus {
   ACTIVE = 'ACTIVE',
+  /** Tạm ngưng công tác — vẫn còn trong hệ thống, không tính đang làm việc */
+  SUSPENDED = 'SUSPENDED',
   INACTIVE = 'INACTIVE',
+}
+
+export enum EmployeeGender {
+  MALE = 'MALE',
+  FEMALE = 'FEMALE',
+  OTHER = 'OTHER',
+}
+
+export enum ContractType {
+  PROBATION = 'PROBATION',
+  OFFICIAL = 'OFFICIAL',
+  INDEFINITE = 'INDEFINITE',
+  INTERN = 'INTERN',
 }
 
 export enum DepartmentStatus {
   ACTIVE = 'ACTIVE',
+  /** Bản nháp — chưa đưa vào vận hành */
+  DRAFT = 'DRAFT',
   INACTIVE = 'INACTIVE',
 }
 

@@ -6,44 +6,22 @@ import {
   ParseIntPipe,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { ApiCookieAuth, ApiTags } from '@nestjs/swagger';
-import { IsEnum, IsInt, IsOptional, IsString } from 'class-validator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
-import { DepartmentStatus, UserRole } from '../common/enums';
+import { UserRole } from '../common/enums';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
+import {
+  CheckCodeQueryDto,
+  CreateDepartmentDto,
+  ListDepartmentsQueryDto,
+  UpdateDepartmentDto,
+} from './dto/department.dto';
 import { DepartmentsService } from './departments.service';
-
-class CreateDepartmentDto {
-  @IsString()
-  departmentCode: string;
-  @IsString()
-  name: string;
-  @IsOptional()
-  @IsString()
-  description?: string;
-  @IsOptional()
-  @IsInt()
-  managerEmployeeId?: number;
-}
-
-class UpdateDepartmentDto {
-  @IsOptional()
-  @IsString()
-  name?: string;
-  @IsOptional()
-  @IsString()
-  description?: string;
-  @IsOptional()
-  @IsInt()
-  managerEmployeeId?: number | null;
-  @IsOptional()
-  @IsEnum(DepartmentStatus)
-  status?: DepartmentStatus;
-}
 
 @ApiTags('departments')
 @ApiCookieAuth()
@@ -52,9 +30,34 @@ class UpdateDepartmentDto {
 export class DepartmentsController {
   constructor(private readonly service: DepartmentsService) {}
 
+  @Get('stats')
+  stats() {
+    return this.service.stats();
+  }
+
+  @Get('next-code')
+  @Roles(UserRole.ADMIN)
+  nextCode() {
+    return this.service.nextCode();
+  }
+
+  @Get('check-code')
+  @Roles(UserRole.ADMIN)
+  checkCode(@Query() query: CheckCodeQueryDto) {
+    return this.service.checkCode(query.code);
+  }
+
   @Get()
-  findAll() {
-    return this.service.findAll();
+  findAll(@Query() query: ListDepartmentsQueryDto) {
+    return this.service.findAll(query);
+  }
+
+  @Get(':id/audit')
+  audit(
+    @Param('id', ParseIntPipe) id: number,
+    @Query('limit') limit?: string,
+  ) {
+    return this.service.audit(id, limit ? Number(limit) : 40);
   }
 
   @Get(':id')

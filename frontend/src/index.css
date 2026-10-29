@@ -1,84 +1,36 @@
-:root {
-  --navy: #0f2744;
-  --accent: #0d9488;
-  --accent-dark: #0f766e;
-  --bg: #eef2f6;
-  --sidebar: #12263a;
-  --text: #1e293b;
-  font-family: 'Segoe UI', 'Source Sans 3', system-ui, sans-serif;
-  color: var(--text);
-  background: var(--bg);
-}
+/* Global resets live in styles/admin.css for the Nexora admin shell.
+   Login keeps its own scoped tokens in styles/login.css. */
 
-* {
-  box-sizing: border-box;
+html,
+body,
+#root {
+  min-height: 100%;
 }
 
 body {
   margin: 0;
-  min-height: 100vh;
-  background: var(--bg);
 }
 
-.app-shell {
-  min-height: 100vh;
-  background: var(--bg);
-}
-
-.sidebar {
-  width: 220px;
-  min-height: calc(100vh - 56px);
-  background: var(--sidebar);
-}
-
-.nav-side-link {
-  color: #cbd5e1;
-  text-decoration: none;
-  padding: 0.55rem 0.75rem;
-  border-radius: 8px;
-  display: block;
-}
-
-.nav-side-link:hover,
-.nav-side-link.active {
-  background: rgba(13, 148, 136, 0.25);
-  color: #fff;
-}
-
+/* Legacy helpers still used by module pages */
 .page-title {
-  color: var(--navy);
-  font-weight: 700;
+  color: #004036;
+  font-weight: 800;
+  font-family: 'Manrope', 'Segoe UI', sans-serif;
 }
 
 .btn-accent {
-  background: var(--accent) !important;
-  border-color: var(--accent) !important;
+  background: #004036 !important;
+  border-color: #004036 !important;
 }
 
 .btn-accent:hover {
-  background: var(--accent-dark) !important;
-  border-color: var(--accent-dark) !important;
-}
-
-.stat-card {
-  border: 0;
-  box-shadow: 0 1px 3px rgba(15, 39, 68, 0.08);
-}
-
-.stat-label {
-  color: #64748b;
-  font-size: 0.85rem;
-}
-
-.stat-value {
-  font-size: 1.75rem;
-  font-weight: 700;
-  color: var(--navy);
+  background: #0b2e28 !important;
+  border-color: #0b2e28 !important;
 }
 
 .badge-soft {
-  background: #ccfbf1;
-  color: #115e59;
+  background: #e6f3ee;
+  color: #004036;
   padding: 0.35rem 0.75rem;
   border-radius: 999px;
   font-size: 0.85rem;
@@ -91,13 +43,18 @@ body {
   min-height: 220px;
 }
 
-@media (max-width: 768px) {
-  .sidebar {
-    width: 100%;
-    min-height: auto;
-  }
+.stat-card {
+  border: 0;
+  box-shadow: 0 1px 3px rgba(11, 46, 40, 0.08);
+}
 
-  .d-flex > .sidebar + main {
-    width: 100%;
-  }
+.stat-label {
+  color: #6f7976;
+  font-size: 0.85rem;
+}
+
+.stat-value {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: #004036;
 }

@@ -6,57 +6,22 @@ import {
   ParseIntPipe,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { ApiCookieAuth, ApiTags } from '@nestjs/swagger';
-import { IsEnum, IsInt, IsOptional, IsString } from 'class-validator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
-import { TaskPriority, TaskStatus, UserRole } from '../common/enums';
+import { UserRole } from '../common/enums';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
+import {
+  CreateCommentDto,
+  CreateTaskDto,
+  ListTasksQueryDto,
+  UpdateTaskDto,
+} from './dto/task.dto';
 import { TasksService } from './tasks.service';
-
-class CreateTaskDto {
-  @IsString()
-  title: string;
-  @IsOptional()
-  @IsString()
-  description?: string;
-  @IsOptional()
-  @IsInt()
-  assigneeId?: number;
-  @IsOptional()
-  @IsInt()
-  departmentId?: number;
-  @IsOptional()
-  @IsEnum(TaskPriority)
-  priority?: TaskPriority;
-  @IsOptional()
-  @IsString()
-  dueDate?: string;
-}
-
-class UpdateTaskDto {
-  @IsOptional()
-  @IsString()
-  title?: string;
-  @IsOptional()
-  @IsString()
-  description?: string;
-  @IsOptional()
-  @IsInt()
-  assigneeId?: number;
-  @IsOptional()
-  @IsEnum(TaskPriority)
-  priority?: TaskPriority;
-  @IsOptional()
-  @IsEnum(TaskStatus)
-  status?: TaskStatus;
-  @IsOptional()
-  @IsString()
-  dueDate?: string;
-}
 
 @ApiTags('tasks')
 @ApiCookieAuth()
@@ -65,9 +30,48 @@ class UpdateTaskDto {
 export class TasksController {
   constructor(private readonly service: TasksService) {}
 
+  @Get('stats')
+  stats(@CurrentUser() user: any) {
+    return this.service.stats(user);
+  }
+
+  @Get('next-code')
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
+  nextCode() {
+    return this.service.nextCode();
+  }
+
   @Get()
-  findAll(@CurrentUser() user: any) {
-    return this.service.findAll(user);
+  findAll(@CurrentUser() user: any, @Query() query: ListTasksQueryDto) {
+    return this.service.findAll(user, query);
+  }
+
+  @Get(':id/audit')
+  audit(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: any,
+    @Query('limit') limit?: string,
+  ) {
+    return this.service.audit(id, user, limit ? Number(limit) : 40);
+  }
+
+  @Get(':id/comments')
+  comments(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: any) {
+    return this.service.listComments(id, user);
+  }
+
+  @Post(':id/comments')
+  addComment(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: CreateCommentDto,
+    @CurrentUser() user: any,
+  ) {
+    return this.service.addComment(id, dto, user);
+  }
+
+  @Get(':id')
+  findOne(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: any) {
+    return this.service.findOne(id, user);
   }
 
   @Post()

@@ -1,94 +1,128 @@
-# Hệ thống Quản lý Công ty (Company Management System)
+# Hệ thống Quản lý Công ty (NEXORA)
 
-Ứng dụng web quản lý nội bộ doanh nghiệp — môn **Web nâng cao**, Đại học Phenikaa.
+Ứng dụng web quản lý nội bộ doanh nghiệp — môn **Web nâng cao** (Phenikaa).
 
-**Stack:** NestJS (backend phân lớp) + React + react-bootstrap (frontend) + TypeORM + SQLite.
+**Stack:** NestJS + React (Vite) + react-bootstrap + TypeORM + SQLite.
 
 ---
 
-## Yêu cầu đề bài liên quan đến code (đã lọc)
+## Đối chiếu nghiệp vụ (SRS 1.0 + FRS 1.0)
 
-Các mục **không liên quan code** (báo cáo cứng/PDF, điểm chuyên cần, thảo luận lớp, luật/đạo đức văn bản, ký danh sách nộp…) **không** ghi vào đây — làm riêng trong báo cáo.
+### Phân hệ đã triển khai
 
-### Câu 1 — User Stories (tối thiểu 12–16)
-Định dạng: *Là [vai trò], tôi muốn [hành động].*
+| Mã | Phân hệ | API | Giao diện (admin / theo role) | Ghi chú đối chiếu |
+|----|---------|-----|-------------------------------|-------------------|
+| MOD-01 | Tài khoản & phân quyền | `/api/auth`, `/api/users` | Login, Users list/create/detail | UC-01…03, UI-01…02 |
+| MOD-02 | Nhân sự & phòng ban | `/api/employees`, `/api/departments` | Employees ×3, Departments ×3 | UC-04…05, UI-03…04 |
+| MOD-03 | Công việc | `/api/tasks` | Tasks list/create/detail | UC-06…07, UI-05 |
+| MOD-04 | Chấm công + ảnh | `/api/attendance` | Attendance list/detail (+ check-in/out camera) | UC-08…09, UI-06…07 — **theo SRS**: ảnh trực tiếp + thời gian máy chủ |
+| MOD-05 | Nghỉ phép | `/api/leave` | Leave list/create/detail | UC-10…11, UI-09 |
+| MOD-06 | Dashboard & nhật ký | `/api/dashboard`, `/api/system-logs` | Dashboard, Logs | UC-12…13, UI-10 |
+
+### 19 màn admin (FE mẫu đã gửi)
+
+| # | Màn | Route |
+|---|-----|--------|
+| 1 | Đăng nhập | `/login` |
+| 2 | Dashboard | `/dashboard` |
+| 3 | Danh sách tài khoản | `/users` |
+| 4 | Tạo tài khoản | `/users/new` |
+| 5 | Chi tiết tài khoản | `/users/:id` |
+| 6 | Danh sách nhân sự | `/employees` |
+| 7 | Tạo nhân viên | `/employees/new` |
+| 8 | Chi tiết nhân viên | `/employees/:id` |
+| 9 | Danh sách phòng ban | `/departments` |
+| 10 | Tạo phòng ban | `/departments/new` |
+| 11 | Chi tiết phòng ban | `/departments/:id` |
+| 12 | Danh sách công việc | `/tasks` |
+| 13 | Tạo công việc | `/tasks/new` |
+| 14 | Chi tiết công việc | `/tasks/:id` |
+| 15 | Lịch sử chấm công | `/attendance` |
+| 16 | Chi tiết bản ghi chấm công | `/attendance/:id` |
+| 17 | Danh sách nghỉ phép | `/leave` |
+| 18 | Tạo đơn nghỉ phép | `/leave/new` |
+| 19 | Chi tiết / phê duyệt nghỉ phép | `/leave/:id` |
+
+*(Nhật ký hệ thống `/logs` — hỗ trợ UC-13, không tính trong 19 màn mock admin chính.)*
+
+### Ma trận quyền (đã kiểm tại backend + UI)
+
+| Chức năng | Admin | Manager | Employee |
+|-----------|-------|---------|----------|
+| Quản lý tài khoản / nhật ký | Có | Không (API 403 + UI ẩn/redirect) | Không |
+| Nhân sự / phòng ban | Toàn công ty | Phạm vi quản lý | Xem theo API scope (hồ sơ liên quan) |
+| Tạo / giao việc | Có | Phạm vi quản lý | Không (UI chặn `/tasks/new`) |
+| Cập nhật công việc được giao | Có | Có | Có |
+| Chấm công ảnh | Theo chính sách | Theo chính sách | Check-in/out + lịch sử bản thân |
+| Tra cứu chấm công | Toàn công ty | Phạm vi QL | Bản thân |
+| Gửi đơn nghỉ | Có (nếu gắn NV) | Có (nếu gắn NV) | Có |
+| Phê duyệt nghỉ | Có | Có (phạm vi) | Không |
+| Dashboard | Toàn công ty | Phạm vi QL | Cá nhân |
+
+### Quy tắc nghiệp vụ cốt lõi đã cover
+
+- **BR-ACC / BR-01…05:** JWT cookie, bcrypt, RolesGuard, LOCKED không login, không tự nâng quyền.
+- **BR-HR:** Mã NV duy nhất; phòng ban INACTIVE không gán mới (service).
+- **BR-TASK:** Task mới = `TODO`; employee chỉ sửa việc được giao.
+- **BR-ATT (SRS):** 1 bản ghi/ngày (`UNIQUE employee+workDate`); ra sau vào; bắt buộc ảnh; thời gian server; ảnh private qua `/attendance/photo/:key`.
+- **BR-LEAVE:** Đơn mới `PENDING`; chỉ PENDING mới duyệt; lưu reviewer + thời điểm; ghi log.
+- **BR-DASH / BR-SEC:** Dashboard theo role; log thao tác quan trọng; không ghi password/token.
+
+### Lệch FRS (cố ý / phiên bản 1.0)
+
+| FRS | Trạng thái | Lý do |
+|-----|------------|--------|
+| UI-08 / AT-13 Cấu hình địa điểm + GPS chấm công | **Chưa triển khai** | **SRS 1.0** nhấn mạnh ảnh + thời gian máy chủ; ngoài phạm vi SRS: AI khuôn mặt; GPS là mở rộng FRS — giữ backlog |
+| Nhận diện khuôn mặt AI | Không làm | Ngoài phạm vi SRS/FRS |
+| Báo cáo BI / xuất đa định dạng / điều chỉnh chấm công | Không làm | Ngoài phạm vi |
+| Copy marketing login (AI/GPS) | **Đã sửa** | Khớp SRS: ảnh trực tiếp + server time |
+
+---
+
+## User Stories (đề bài)
 
 | # | User Story |
 |---|------------|
-| 1 | Là người dùng, tôi muốn đăng nhập vào hệ thống bằng tài khoản của mình. |
-| 2 | Là người dùng, tôi muốn đăng xuất để kết thúc phiên làm việc an toàn. |
-| 3 | Là người quản trị, tôi muốn quản lý tài khoản và phân quyền theo vai trò. |
-| 4 | Là người quản trị, tôi muốn quản lý hồ sơ nhân viên toàn công ty. |
-| 5 | Là người quản trị, tôi muốn quản lý phòng ban và người phụ trách. |
-| 6 | Là người quản lý, tôi muốn xem nhân viên thuộc phạm vi quản lý của mình. |
-| 7 | Là người quản lý, tôi muốn tạo và giao công việc cho nhân viên. |
-| 8 | Là nhân viên, tôi muốn xem và cập nhật tiến độ công việc được giao. |
-| 9 | Là nhân viên, tôi muốn chấm công vào/ra kèm ảnh chụp trực tiếp. |
-| 10 | Là nhân viên, tôi muốn xem lịch sử chấm công của bản thân. |
-| 11 | Là người quản lý, tôi muốn tra cứu chấm công nhân viên trong phạm vi quản lý. |
-| 12 | Là nhân viên, tôi muốn gửi đơn nghỉ phép và theo dõi kết quả. |
-| 13 | Là người quản lý, tôi muốn phê duyệt hoặc từ chối đơn nghỉ phép. |
-| 14 | Là người dùng, tôi muốn xem Dashboard tổng hợp theo vai trò của mình. |
-| 15 | Là người quản trị, tôi muốn tra cứu nhật ký thao tác quan trọng. |
-| 16 | Là nhân viên, tôi muốn cập nhật một số thông tin hồ sơ cá nhân được phép. |
-
-### Câu 2–3 (thiết kế / khung làm việc)
-- **2a–2b:** Phân tích yêu cầu, Class Diagram, sơ đồ thuật toán → trong báo cáo (UML).
-- **3a:** Wireframe giao diện chính → trong báo cáo / JustInMind.
-- **3b:** Luồng xử lý thông tin chính → trong báo cáo (flowchart SRS).
-- **3c:** NestJS + React, mô hình phân lớp, có tệp `LICENSE` (bản quyền).
-- **3d:** Backend Security; Frontend không lộ thông tin người dùng / dữ liệu nhạy cảm khi gọi API.
-
-### Câu 4 — API & bảo mật
-- **4a:** API nghiệp vụ (auth, users, employees, departments, tasks, attendance, leave, dashboard, logs).
-- **4b:** Tài liệu hóa API (Swagger tại `/api/docs`).
-- **4c:** Token JWT (httpOnly cookie), bcrypt mật khẩu, session/cookie, CORS, CSRF (double-submit / X-CSRF-Token), xác thực & phân quyền RolesGuard.
-
-### Câu 5 — Frontend
-- **5a:** Layout thống nhất theo wireframe.
-- **5b:** React + **react-bootstrap**.
-- **5c:** Usability (ít bước tương tác, thông báo rõ, không phiền nhiễu).
-
-### Câu 6 — ORM
-- **6a:** TypeORM + CSDL quan hệ (SQLite mặc định; có thể đổi PostgreSQL).
-- **6b:** Phân tích ORM / truy vấn → trong báo cáo; code nằm ở `backend/src/**/*.entity.ts` và services.
-
-### Câu 7 — Kiểm thử
-- **7a:** Validation & exception filter bắt lỗi.
-- **7b:** Unit test trong `backend/src/**/*.spec.ts` và `backend/test/`.
-- **7c–7e:** E2E / kiểm thử UI → chạy thủ công + báo cáo.
-
-### Câu 8–10 (nộp bài / Git / đóng góp)
-Link Demo, Github, contribution, commits — ghi trong báo cáo cứng/PDF. Không thay thế bằng README này.
+| 1 | Là người dùng, tôi muốn đăng nhập bằng tài khoản của mình. |
+| 2 | Là người dùng, tôi muốn đăng xuất an toàn. |
+| 3 | Là Admin, tôi muốn quản lý tài khoản và phân quyền. |
+| 4 | Là Admin, tôi muốn quản lý hồ sơ nhân viên toàn công ty. |
+| 5 | Là Admin, tôi muốn quản lý phòng ban và người phụ trách. |
+| 6 | Là Manager, tôi muốn xem nhân viên thuộc phạm vi quản lý. |
+| 7 | Là Manager, tôi muốn tạo và giao công việc. |
+| 8 | Là Employee, tôi muốn xem và cập nhật tiến độ công việc được giao. |
+| 9 | Là Employee, tôi muốn chấm công vào/ra kèm ảnh chụp trực tiếp. |
+| 10 | Là Employee, tôi muốn xem lịch sử chấm công của bản thân. |
+| 11 | Là Manager, tôi muốn tra cứu chấm công trong phạm vi quản lý. |
+| 12 | Là Employee, tôi muốn gửi đơn nghỉ phép và theo dõi kết quả. |
+| 13 | Là Manager/Admin, tôi muốn phê duyệt hoặc từ chối đơn nghỉ phép. |
+| 14 | Là người dùng, tôi muốn xem Dashboard theo vai trò. |
+| 15 | Là Admin, tôi muốn tra cứu nhật ký thao tác quan trọng. |
+| 16 | Là Employee, tôi muốn cập nhật một số thông tin hồ sơ cá nhân được phép. |
 
 ---
 
-## Cấu trúc thư mục
+## Kiểm thử đã chạy (self-test)
 
+### API (`node scripts/api-selftest.mjs`)
+
+Kết quả gần nhất: **PASS=42 · FAIL=0 · SKIP=1** (GPS work-locations — backlog FRS).
+
+Bao gồm: login 3 role, sai mật khẩu, chặn employee `/users` & logs & duyệt phép, CRUD users/employees/departments/tasks, leave PENDING→APPROVED, check-in/out ảnh, chống trùng chấm công, dashboard, logout.
+
+### Selenium UI (`python scripts/ui_selenium_test.py`)
+
+Kết quả gần nhất: **PASS=26 · FAIL=0** — mở Chrome thật, đăng nhập admin, duyệt 19 màn (+ logs), click chi tiết, gửi đơn nghỉ, sidebar, bad login, manager bị hạn chế `/users`.
+
+```bash
+# Terminal 1–2: backend + frontend đang chạy
+node scripts/api-selftest.mjs
+python scripts/ui_selenium_test.py
 ```
-/
-├── LICENSE                 # Bản quyền theo yêu cầu đề
-├── README.md
-├── backend/                # NestJS (Controller → Service → Repository/Entity)
-│   ├── src/
-│   │   ├── auth/
-│   │   ├── users/
-│   │   ├── employees/
-│   │   ├── departments/
-│   │   ├── tasks/
-│   │   ├── attendance/
-│   │   ├── leave/
-│   │   ├── dashboard/
-│   │   ├── system-logs/
-│   │   └── common/         # guards, filters, decorators
-│   └── test/
-└── frontend/               # React + Vite + react-bootstrap
-    └── src/
-        ├── api/            # axios client (credentials, CSRF; không log token)
-        ├── components/
-        ├── pages/
-        └── contexts/
-```
+
+Kết quả ghi tại `scripts/api-selftest-results.txt`, `scripts/ui-selenium-results.txt`.
+
+---
 
 ## Chạy dự án
 
@@ -97,7 +131,7 @@ Link Demo, Github, contribution, commits — ghi trong báo cáo cứng/PDF. Kh�
 cd backend
 npm install
 npm run start:dev
-# API: http://localhost:3000
+# API: http://localhost:3000/api
 # Swagger: http://localhost:3000/api/docs
 ```
 
@@ -110,29 +144,35 @@ npm run dev
 ```
 
 ### Tài khoản demo (seed)
+
 | Username | Password | Role |
 |----------|----------|------|
 | admin | Admin@123 | ADMIN |
 | manager | Manager@123 | MANAGER |
 | employee | Employee@123 | EMPLOYEE |
 
-## Bảo mật đã thiết lập
-- Mật khẩu băm bcrypt — không lưu plain text.
-- JWT trong cookie `httpOnly` + `sameSite`.
-- CSRF token header `X-CSRF-Token`.
-- CORS chỉ origin frontend đã cấu hình.
-- RolesGuard kiểm tra quyền từng API.
-- Ảnh chấm công lưu thư mục private, phục vụ qua endpoint có auth (không public URL lộ path).
-- Frontend: không lưu token trong `localStorage`; không `console.log` dữ liệu nhạy cảm; response chỉ giữ field cần hiển thị.
+---
 
-## Phân hệ (SRS)
-| Mã | Phân hệ |
-|----|---------|
-| MOD-01 | Tài khoản & phân quyền |
-| MOD-02 | Nhân sự & phòng ban |
-| MOD-03 | Công việc |
-| MOD-04 | Chấm công + ảnh |
-| MOD-05 | Nghỉ phép |
-| MOD-06 | Dashboard & nhật ký |
+## Bảo mật
 
-Chi tiết nghiệp vụ: xem tài liệu SRS nhóm đã cung cấp.
+- Mật khẩu bcrypt; JWT `httpOnly` + `sameSite`.
+- CSRF `X-CSRF-Token`; CORS theo origin FE.
+- RolesGuard trên API; FE `RoleRoute` + ẩn menu theo role (không thay thế backend).
+- Ảnh chấm công private, không URL công khai tới file storage.
+- Không lưu token trong `localStorage`; không log dữ liệu nhạy cảm.
+
+---
+
+## Cấu trúc
+
+```
+/
+├── LICENSE
+├── README.md
+├── scripts/                 # api-selftest.mjs, ui_selenium_test.py
+├── backend/src/             # auth, users, employees, departments, tasks,
+│                            # attendance, leave, dashboard, system-logs
+└── frontend/src/pages/      # 19 màn + Logs
+```
+
+Chi tiết SRS/FRS gốc: tài liệu nhóm (SRS + FRS phiên bản 1.0). README này là bản **đối chiếu triển khai** với code hiện tại.

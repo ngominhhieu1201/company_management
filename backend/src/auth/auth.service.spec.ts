@@ -12,6 +12,8 @@ describe('AuthService', () => {
   const usersService = {
     findByUsername: jest.fn(),
     findByLoginIdentifier: jest.fn(),
+    findById: jest.fn(),
+    recordLogin: jest.fn().mockResolvedValue(undefined),
     toPublic: jest.fn((u) => ({
       id: u.id,
       username: u.username,
@@ -38,17 +40,20 @@ describe('AuthService', () => {
 
   it('login success', async () => {
     const hash = await bcrypt.hash('Admin@123', 10);
-    usersService.findByLoginIdentifier.mockResolvedValue({
+    const user = {
       id: 1,
       username: 'admin',
       passwordHash: hash,
       role: UserRole.ADMIN,
       status: AccountStatus.ACTIVE,
       employeeId: null,
-    });
+    };
+    usersService.findByLoginIdentifier.mockResolvedValue(user);
+    usersService.findById.mockResolvedValue(user);
     const result = await service.login('admin', 'Admin@123');
     expect(result.accessToken).toBe('token');
     expect(result.user.username).toBe('admin');
+    expect(usersService.recordLogin).toHaveBeenCalled();
   });
 
   it('login fail wrong password', async () => {

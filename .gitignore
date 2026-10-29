@@ -16,3 +16,5 @@ frontend/dist/
 backend/dist/
 backend/company.db
 backend/uploads/
+
+scripts/*-results.txt

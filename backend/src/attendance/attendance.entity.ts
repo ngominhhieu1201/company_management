@@ -35,6 +35,12 @@ export class AttendanceRecord {
   @Column({ type: 'varchar', default: AttendanceStatus.IN_PROGRESS })
   status: AttendanceStatus;
 
+  @Column({ name: 'record_code', type: 'varchar', nullable: true })
+  recordCode: string | null;
+
+  @Column({ default: false })
+  flagged: boolean;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

@@ -5,6 +5,7 @@ import {
   AttendanceStatus,
   EmployeeStatus,
   LeaveStatus,
+  LeaveType,
   TaskStatus,
   UserRole,
 } from '../common/enums';
@@ -15,6 +16,15 @@ import { LeaveRequest } from '../leave/leave-request.entity';
 import { Task } from '../tasks/task.entity';
 
 type AuthUser = { id: number; role: UserRole; employeeId: number | null };
+
+const LATE_AFTER_MINUTES = 8 * 60 + 30; // 08:30
+
+const LEAVE_TYPE_LABEL: Record<LeaveType, string> = {
+  [LeaveType.ANNUAL]: 'Nghỉ phép năm',
+  [LeaveType.SICK]: 'Nghỉ ốm',
+  [LeaveType.UNPAID]: 'Nghỉ không lương',
+  [LeaveType.OTHER]: 'Khác',
+};
 
 @Injectable()
 export class DashboardService {
@@ -32,26 +42,7 @@ export class DashboardService {
 
   async getStats(user: AuthUser) {
     if (user.role === UserRole.ADMIN) {
-      const employees = await this.empRepo.count({
-        where: { status: EmployeeStatus.ACTIVE },
-      });
-      const departments = await this.deptRepo.count();
-      const tasks = await this.taskRepo.find();
-      const byStatus = this.countBy(tasks, 'status');
-      const attendanceToday = await this.attRepo.count({
-        where: { workDate: new Date().toISOString().slice(0, 10) },
-      });
-      const pendingLeave = await this.leaveRepo.count({
-        where: { status: LeaveStatus.PENDING },
-      });
-      return {
-        role: user.role,
-        employees,
-        departments,
-        tasksByStatus: byStatus,
-        attendanceToday,
-        pendingLeave,
-      };
+      return this.adminOverview();
     }
 
     if (user.role === UserRole.MANAGER) {
@@ -121,6 +112,126 @@ export class DashboardService {
       leavePending: myLeave.filter((l) => l.status === LeaveStatus.PENDING)
         .length,
     };
+  }
+
+  private async adminOverview() {
+    const today = new Date().toISOString().slice(0, 10);
+    const employees = await this.empRepo.find({
+      where: { status: EmployeeStatus.ACTIVE },
+    });
+    const empMap = new Map(employees.map((e) => [e.id, e]));
+    const totalStaff = employees.length;
+
+    const attendanceRows = await this.attRepo.find({
+      where: { workDate: today },
+    });
+    let onTime = 0;
+    let late = 0;
+    let checkInSum = 0;
+    let checkInCount = 0;
+    for (const row of attendanceRows) {
+      if (!row.checkInTime) continue;
+      const d = new Date(row.checkInTime);
+      const mins = d.getHours() * 60 + d.getMinutes();
+      if (mins > LATE_AFTER_MINUTES) late += 1;
+      else onTime += 1;
+      checkInSum += mins;
+      checkInCount += 1;
+    }
+    const checkedIn = onTime + late;
+    const notCheckedIn = Math.max(0, totalStaff - checkedIn);
+    const avgMins =
+      checkInCount > 0 ? Math.round(checkInSum / checkInCount) : null;
+    const avgCheckIn =
+      avgMins != null
+        ? `${String(Math.floor(avgMins / 60)).padStart(2, '0')}:${String(avgMins % 60).padStart(2, '0')}`
+        : null;
+
+    const tasks = await this.taskRepo.find({ order: { updatedAt: 'DESC' } });
+    const openTasks = tasks.filter((t) => t.status !== TaskStatus.DONE);
+    const dueSoon = openTasks.filter(
+      (t) =>
+        t.dueDate &&
+        t.dueDate <=
+          new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10),
+    ).length;
+
+    const pendingLeaves = await this.leaveRepo.find({
+      where: { status: LeaveStatus.PENDING },
+      order: { createdAt: 'DESC' },
+      take: 8,
+    });
+
+    const workingPct =
+      totalStaff > 0 ? Math.round((checkedIn / totalStaff) * 1000) / 10 : 0;
+
+    return {
+      role: UserRole.ADMIN,
+      employees: totalStaff,
+      departments: await this.deptRepo.count(),
+      workingToday: checkedIn,
+      workingPct,
+      openTasks: openTasks.length,
+      dueSoon,
+      pendingLeave: pendingLeaves.length,
+      attendanceToday: checkedIn,
+      tasksByStatus: this.countBy(tasks, 'status'),
+      attendance: {
+        checkedIn,
+        onTime,
+        late,
+        notCheckedIn,
+        onTimePct: checkedIn ? Math.round((onTime / checkedIn) * 1000) / 10 : 0,
+        latePct: checkedIn ? Math.round((late / checkedIn) * 1000) / 10 : 0,
+        notCheckedInPct:
+          totalStaff > 0
+            ? Math.round((notCheckedIn / totalStaff) * 1000) / 10
+            : 0,
+        avgCheckIn,
+      },
+      pendingLeaveRequests: pendingLeaves.map((l) => {
+        const emp = empMap.get(l.employeeId);
+        return {
+          id: l.id,
+          employeeId: l.employeeId,
+          employeeName: emp?.fullName ?? `NV #${l.employeeId}`,
+          leaveType: l.leaveType,
+          leaveTypeLabel:
+            LEAVE_TYPE_LABEL[l.leaveType] ?? String(l.leaveType),
+          startDate: l.startDate,
+          endDate: l.endDate,
+          reason: l.reason,
+        };
+      }),
+      activeTasks: openTasks.slice(0, 8).map((t) => {
+        const emp = t.assigneeId ? empMap.get(t.assigneeId) : null;
+        return {
+          id: t.id,
+          title: t.title,
+          assigneeId: t.assigneeId,
+          assigneeName: emp?.fullName ?? 'Chưa giao',
+          dueDate: t.dueDate,
+          status: t.status,
+          priority: t.priority,
+          progress: this.progressFromStatus(t.status),
+        };
+      }),
+    };
+  }
+
+  private progressFromStatus(status: TaskStatus): number {
+    switch (status) {
+      case TaskStatus.TODO:
+        return 12;
+      case TaskStatus.IN_PROGRESS:
+        return 45;
+      case TaskStatus.REVIEW:
+        return 78;
+      case TaskStatus.DONE:
+        return 100;
+      default:
+        return 0;
+    }
   }
 
   private countBy<T extends Record<string, any>>(items: T[], key: keyof T) {

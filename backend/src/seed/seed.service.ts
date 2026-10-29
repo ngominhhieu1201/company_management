@@ -31,6 +31,20 @@ export class SeedService implements OnModuleInit {
       }
     }
 
+    // Bổ sung metadata phòng ban cho DB đã seed trước đó
+    const existingDepts = await this.departments.find();
+    for (const d of existingDepts) {
+      let dirty = false;
+      if (d.departmentCode === 'IT' && d.headcountTarget == null) {
+        d.headcountTarget = 10;
+        d.foundedAt = d.foundedAt || '2020-01-01';
+        d.location = d.location || 'Tầng 12 – Tòa nhà Central Hub';
+        d.category = d.category || 'ENGINEERING';
+        dirty = true;
+      }
+      if (dirty) await this.departments.save(d);
+    }
+
     const count = await this.users.count();
     if (count > 0) return;
 
@@ -39,6 +53,10 @@ export class SeedService implements OnModuleInit {
         departmentCode: 'IT',
         name: 'Công nghệ thông tin',
         description: 'Phòng CNTT',
+        headcountTarget: 10,
+        foundedAt: '2020-01-01',
+        location: 'Tầng 12 – Tòa nhà Central Hub',
+        category: 'ENGINEERING',
         status: DepartmentStatus.ACTIVE,
       }),
     );

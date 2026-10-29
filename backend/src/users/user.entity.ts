@@ -27,6 +27,12 @@ export class User {
   @Column({ name: 'employee_id', type: 'integer', nullable: true })
   employeeId: number | null;
 
+  @Column({ name: 'last_login_at', type: 'datetime', nullable: true })
+  lastLoginAt: Date | null;
+
+  @Column({ name: 'last_login_ip', type: 'varchar', nullable: true })
+  lastLoginIp: string | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

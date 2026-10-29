@@ -44,6 +44,10 @@ export class AuthService {
       },
       { expiresIn },
     );
+    await this.usersService.recordLogin(
+      user.id,
+      options?.sessionIp ?? null,
+    );
     await this.logs.log({
       actorUserId: user.id,
       action: 'LOGIN',
@@ -54,13 +58,14 @@ export class AuthService {
         sessionIp: options?.sessionIp ?? null,
       },
     });
+    const refreshed = await this.usersService.findById(user.id);
     return {
       accessToken: token,
       rememberMe: !!options?.rememberMe,
       maxAgeMs: options?.rememberMe
         ? 30 * 24 * 60 * 60 * 1000
         : 8 * 60 * 60 * 1000,
-      user: this.usersService.toPublic(user),
+      user: this.usersService.toPublic(refreshed ?? user),
     };
   }
 

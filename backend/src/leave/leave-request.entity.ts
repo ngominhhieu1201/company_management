@@ -15,6 +15,9 @@ export class LeaveRequest {
   @Column({ name: 'employee_id' })
   employeeId: number;
 
+  @Column({ name: 'leave_code', type: 'varchar', nullable: true })
+  leaveCode: string | null;
+
   @Column({ name: 'leave_type', type: 'varchar' })
   leaveType: LeaveType;
 
@@ -24,8 +27,20 @@ export class LeaveRequest {
   @Column({ name: 'end_date', type: 'date' })
   endDate: string;
 
+  @Column({ name: 'days_count', type: 'real', nullable: true })
+  daysCount: number | null;
+
   @Column({ type: 'text', nullable: true })
   reason: string | null;
+
+  @Column({ name: 'handover_employee_id', type: 'integer', nullable: true })
+  handoverEmployeeId: number | null;
+
+  @Column({ type: 'varchar', default: 'NORMAL' })
+  urgency: string;
+
+  @Column({ name: 'attachment_name', type: 'varchar', nullable: true })
+  attachmentName: string | null;
 
   @Column({ type: 'varchar', default: LeaveStatus.PENDING })
   status: LeaveStatus;

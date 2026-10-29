@@ -7,59 +7,26 @@ import {
   Patch,
   Post,
   Query,
+  Res,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
-import { ApiCookieAuth, ApiTags } from '@nestjs/swagger';
-import { IsEnum, IsInt, IsOptional, IsString } from 'class-validator';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiConsumes, ApiCookieAuth, ApiTags } from '@nestjs/swagger';
+import { memoryStorage } from 'multer';
+import { Response } from 'express';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
-import { EmployeeStatus, UserRole } from '../common/enums';
+import { UserRole } from '../common/enums';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
+import {
+  CreateEmployeeDto,
+  ListEmployeesQueryDto,
+  UpdateEmployeeDto,
+} from './dto/employee.dto';
 import { EmployeesService } from './employees.service';
-
-class CreateEmployeeDto {
-  @IsString()
-  employeeCode: string;
-  @IsString()
-  fullName: string;
-  @IsOptional()
-  @IsString()
-  email?: string;
-  @IsOptional()
-  @IsString()
-  phone?: string;
-  @IsOptional()
-  @IsInt()
-  departmentId?: number;
-  @IsOptional()
-  @IsString()
-  position?: string;
-  @IsOptional()
-  @IsString()
-  hireDate?: string;
-}
-
-class UpdateEmployeeDto {
-  @IsOptional()
-  @IsString()
-  fullName?: string;
-  @IsOptional()
-  @IsString()
-  email?: string;
-  @IsOptional()
-  @IsString()
-  phone?: string;
-  @IsOptional()
-  @IsInt()
-  departmentId?: number | null;
-  @IsOptional()
-  @IsString()
-  position?: string;
-  @IsOptional()
-  @IsEnum(EmployeeStatus)
-  status?: EmployeeStatus;
-}
 
 @ApiTags('employees')
 @ApiCookieAuth()
@@ -68,9 +35,47 @@ class UpdateEmployeeDto {
 export class EmployeesController {
   constructor(private readonly service: EmployeesService) {}
 
+  @Get('stats')
+  stats(@CurrentUser() user: any) {
+    return this.service.stats(user);
+  }
+
+  @Get('options')
+  options(@CurrentUser() user: any) {
+    return this.service.findOptions(user);
+  }
+
+  @Get('next-code')
+  @Roles(UserRole.ADMIN)
+  nextCode() {
+    return this.service.nextCode();
+  }
+
+  @Get('photo/:key')
+  async photo(@Param('key') key: string, @Res() res: Response) {
+    const stream = await this.service.getPhotoStream(key);
+    const lower = key.toLowerCase();
+    const type = lower.endsWith('.png')
+      ? 'image/png'
+      : lower.endsWith('.webp')
+        ? 'image/webp'
+        : 'image/jpeg';
+    res.setHeader('Content-Type', type);
+    stream.pipe(res);
+  }
+
   @Get()
-  findAll(@CurrentUser() user: any, @Query('q') q?: string) {
-    return this.service.findAll(user, q);
+  findAll(@CurrentUser() user: any, @Query() query: ListEmployeesQueryDto) {
+    return this.service.findAll(user, query);
+  }
+
+  @Get(':id/audit')
+  audit(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: any,
+    @Query('limit') limit?: string,
+  ) {
+    return this.service.audit(id, user, limit ? Number(limit) : 40);
   }
 
   @Get(':id')
@@ -84,7 +89,25 @@ export class EmployeesController {
     return this.service.create(dto, user.id);
   }
 
+  @Post(':id/photo')
+  @Roles(UserRole.ADMIN, UserRole.MANAGER)
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(
+    FileInterceptor('photo', {
+      storage: memoryStorage(),
+      limits: { fileSize: 5 * 1024 * 1024 },
+    }),
+  )
+  uploadPhoto(
+    @Param('id', ParseIntPipe) id: number,
+    @UploadedFile() file: Express.Multer.File,
+    @CurrentUser() user: any,
+  ) {
+    return this.service.uploadPhoto(id, file, user);
+  }
+
   @Patch(':id')
+  @Roles(UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)
   update(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateEmployeeDto,

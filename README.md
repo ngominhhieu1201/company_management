@@ -1,6 +1,68 @@
 # NEXORA WorkSuite
 
-Ứng dụng quản lý nội bộ doanh nghiệp (NestJS + React + SQLite).
+Ứng dụng web quản lý nội bộ doanh nghiệp — 3 vai trò Admin / Manager / Employee.
+
+---
+
+## Stack công nghệ
+
+| Tầng | Công nghệ |
+|------|-----------|
+| Frontend | React 18, TypeScript, Vite, React Router, react-bootstrap / Bootstrap 5, Axios |
+| Backend | NestJS 10, TypeORM, class-validator, Passport JWT, Swagger |
+| Database | SQLite (`backend/company.db`) — file local, **không** commit lên git |
+| Auth | JWT trong cookie `httpOnly` + CSRF (`X-CSRF-Token`), bcrypt |
+| Upload | Multer (ảnh chấm công lưu private trên server) |
+
+---
+
+## Kiến trúc hệ thống (tóm tắt)
+
+```
+[Browser :5173]  --HTTP/JSON + cookie-->  [NestJS API :3000/api]
+        |                                        |
+   React SPA                              TypeORM + SQLite
+   (pages theo role)                      Modules: auth, users,
+                                          employees, departments,
+                                          tasks, attendance, leave,
+                                          dashboard, system-logs, seed
+```
+
+- **Client–server tách biệt**: FE Vite gọi API qua Axios (cookie + CSRF).
+- **Phân quyền**: backend `RolesGuard` + FE `RoleRoute` / ẩn menu theo role.
+- **Phạm vi dữ liệu**: Admin = toàn công ty; Manager = phòng ban QL; Employee = dữ liệu cá nhân.
+- **Seed tự động**: lần chạy backend đầu (DB trống) tạo sẵn 3 user demo + phòng ban/NV mẫu. Clone repo **không** mang theo DB của máy khác.
+
+---
+
+## Cấu trúc thư mục
+
+```
+/
+├── README.md
+├── backend/                 # NestJS API
+│   ├── company.db           # SQLite (local, gitignore)
+│   └── src/
+│       ├── auth/            # login, logout, CSRF, JWT, profile
+│       ├── users/           # tài khoản hệ thống
+│       ├── employees/       # hồ sơ nhân sự
+│       ├── departments/     # phòng ban
+│       ├── tasks/           # công việc
+│       ├── attendance/      # chấm công + ảnh
+│       ├── leave/           # nghỉ phép
+│       ├── dashboard/       # tổng quan theo role
+│       ├── system-logs/     # nhật ký (Admin)
+│       └── seed/            # seed tài khoản demo
+└── frontend/                # React SPA
+    └── src/
+        ├── pages/           # màn hình theo module
+        ├── components/      # layout, RoleRoute, …
+        ├── contexts/        # AuthContext
+        ├── api/             # Axios client
+        └── styles/          # CSS theo module
+```
+
+---
 
 ## Chạy dự án
 
@@ -20,7 +82,7 @@ npm run dev
 ```
 App: http://localhost:5173
 
-### Tài khoản demo
+### Tài khoản demo (seed khi DB trống)
 
 | Username | Password     | Role     |
 |----------|--------------|----------|

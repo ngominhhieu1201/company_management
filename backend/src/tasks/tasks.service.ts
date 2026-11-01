@@ -5,7 +5,10 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { createReadStream, existsSync, mkdirSync, writeFileSync } from 'fs';
+import { extname, join } from 'path';
 import { In, Repository } from 'typeorm';
+import { randomUUID } from 'crypto';
 import { TaskStatus, UserRole } from '../common/enums';
 import { Department } from '../departments/department.entity';
 import { Employee } from '../employees/employee.entity';
@@ -16,12 +19,20 @@ import {
   CreateTaskDto,
   CriterionDto,
   ListTasksQueryDto,
+  TaskAttachmentDto,
   UpdateTaskDto,
 } from './dto/task.dto';
 import { TaskComment } from './task-comment.entity';
 import { Task } from './task.entity';
 
 type AuthUser = { id: number; role: UserRole; employeeId: number | null };
+
+export type TaskAttachment = {
+  key: string;
+  originalName: string;
+  size: number;
+  mime: string;
+};
 
 type Criterion = {
   id: string;
@@ -93,8 +104,28 @@ function progressFromCriteria(criteria: Criterion[], fallback: number) {
   return Math.round((done / criteria.length) * 100);
 }
 
+function parseAttachments(raw: string | null | undefined): TaskAttachment[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((a) => a && typeof a.key === 'string' && typeof a.originalName === 'string')
+      .map((a) => ({
+        key: String(a.key),
+        originalName: String(a.originalName),
+        size: Number(a.size) || 0,
+        mime: String(a.mime || 'application/octet-stream'),
+      }));
+  } catch {
+    return [];
+  }
+}
+
 @Injectable()
 export class TasksService {
+  private readonly uploadDir = join(process.cwd(), 'uploads', 'tasks');
+
   constructor(
     @InjectRepository(Task) private readonly repo: Repository<Task>,
     @InjectRepository(TaskComment)
@@ -106,7 +137,60 @@ export class TasksService {
     @InjectRepository(User)
     private readonly users: Repository<User>,
     private readonly logs: SystemLogsService,
-  ) {}
+  ) {
+    if (!existsSync(this.uploadDir)) {
+      mkdirSync(this.uploadDir, { recursive: true });
+    }
+  }
+
+  saveUploadedFile(file: Express.Multer.File): TaskAttachment {
+    if (!file?.buffer?.length) throw new BadRequestException('Empty file');
+    const max = 10 * 1024 * 1024;
+    if (file.size > max) throw new BadRequestException('File quá lớn (tối đa 10MB)');
+    const allowed = [
+      '.pdf',
+      '.png',
+      '.jpg',
+      '.jpeg',
+      '.gif',
+      '.webp',
+      '.doc',
+      '.docx',
+      '.xls',
+      '.xlsx',
+      '.txt',
+      '.zip',
+    ];
+    const ext = extname(file.originalname || '').toLowerCase();
+    if (ext && !allowed.includes(ext)) {
+      throw new BadRequestException('Định dạng tệp không được hỗ trợ');
+    }
+    const key = `${randomUUID()}${ext || ''}`;
+    writeFileSync(join(this.uploadDir, key), file.buffer);
+    return {
+      key,
+      originalName: file.originalname || key,
+      size: file.size,
+      mime: file.mimetype || 'application/octet-stream',
+    };
+  }
+
+  getAttachmentStream(key: string) {
+    const safe = key.replace(/[/\\]/g, '');
+    const path = join(this.uploadDir, safe);
+    if (!existsSync(path)) throw new NotFoundException('File not found');
+    return { stream: createReadStream(path), path, key: safe };
+  }
+
+  private normalizeAttachments(list?: TaskAttachmentDto[]): TaskAttachment[] {
+    if (!list?.length) return [];
+    return list.map((a) => ({
+      key: a.key.trim(),
+      originalName: a.originalName.trim(),
+      size: a.size ?? 0,
+      mime: a.mime?.trim() || 'application/octet-stream',
+    }));
+  }
 
   private async scopeEmployeeIds(user: AuthUser): Promise<number[] | null> {
     if (user.role === UserRole.ADMIN) return null;
@@ -204,6 +288,7 @@ export class TasksService {
         criteria,
         criteriaDone: criteria.filter((c) => c.done).length,
         criteriaTotal: criteria.length,
+        attachments: parseAttachments(t.attachments),
         sla: this.slaOf(t, today),
         createdAt: t.createdAt,
         updatedAt: t.updatedAt,
@@ -600,6 +685,7 @@ export class TasksService {
       departmentId = emp?.departmentId ?? null;
     }
     const criteria = this.normalizeCriteria(dto.criteria);
+    const attachments = this.normalizeAttachments(dto.attachments);
     const { taskCode } = await this.nextCode();
     const status = TaskStatus.TODO;
     const progress =
@@ -628,6 +714,7 @@ export class TasksService {
         estimatedHours: dto.estimatedHours ?? null,
         actualHours: null,
         criteria: criteria.length ? JSON.stringify(criteria) : null,
+        attachments: attachments.length ? JSON.stringify(attachments) : null,
       }),
     );
     await this.logs.log({

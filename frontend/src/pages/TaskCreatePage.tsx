@@ -105,7 +105,10 @@ export default function TaskCreatePage() {
   const [estimateHours, setEstimateHours] = useState('');
   const [collaboratorIds, setCollaboratorIds] = useState<number[]>([]);
   const [reviewerEmployeeId, setReviewerEmployeeId] = useState('');
-  const [attachmentNames, setAttachmentNames] = useState<string[]>([]);
+  const [attachments, setAttachments] = useState<
+    { key: string; originalName: string; size: number; mime: string }[]
+  >([]);
+  const [uploading, setUploading] = useState(false);
   const [selfProfile, setSelfProfile] = useState<SelfProfile | null>(null);
   const [openHours, setOpenHours] = useState<number | null>(null);
 
@@ -302,6 +305,7 @@ export default function TaskCreatePage() {
           ? Number(reviewerEmployeeId)
           : undefined,
         collaboratorIds: collaboratorIds.length ? collaboratorIds : undefined,
+        attachments: attachments.length ? attachments : undefined,
       });
       localStorage.removeItem(EMP_DRAFT_KEY);
       navigate(goDetail ? `/tasks/${data.id}` : '/tasks');
@@ -363,12 +367,38 @@ export default function TaskCreatePage() {
     );
   }
 
-  function onPickFiles(files: FileList | null) {
+  async function onPickFiles(files: FileList | null) {
     if (!files?.length) return;
-    setAttachmentNames((prev) => [
-      ...prev,
-      ...Array.from(files).map((f) => f.name),
-    ]);
+    setUploading(true);
+    setError('');
+    try {
+      const uploaded: {
+        key: string;
+        originalName: string;
+        size: number;
+        mime: string;
+      }[] = [];
+      for (const file of Array.from(files)) {
+        const fd = new FormData();
+        fd.append('file', file, file.name);
+        const { data } = await api.post<{
+          key: string;
+          originalName: string;
+          size: number;
+          mime: string;
+        }>('/tasks/files', fd);
+        uploaded.push(data);
+      }
+      setAttachments((prev) => [...prev, ...uploaded]);
+    } catch {
+      setError('Tải tệp lên thất bại (tối đa 10MB / tệ dạng phổ biến)');
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  function removeAttachment(key: string) {
+    setAttachments((prev) => prev.filter((a) => a.key !== key));
   }
 
   if (isEmployee) {
@@ -530,20 +560,38 @@ export default function TaskCreatePage() {
                 </div>
               </div>
               <div className="nx-emp-tc-field">
-                <label>Đính kèm tệp (UI demo)</label>
+                <label>Đính kèm tệp</label>
                 <label className="nx-emp-tc-drop">
                   <input
                     type="file"
                     multiple
                     hidden
-                    onChange={(e) => onPickFiles(e.target.files)}
+                    disabled={uploading || saving}
+                    onChange={(e) => {
+                      void onPickFiles(e.target.files);
+                      e.target.value = '';
+                    }}
                   />
-                  <span>Kéo thả hoặc chọn tệp — chưa gửi lên server</span>
+                  <span>
+                    {uploading
+                      ? 'Đang tải tệp lên…'
+                      : 'Kéo thả hoặc chọn tệp để đính kèm'}
+                  </span>
                 </label>
-                {attachmentNames.length > 0 && (
+                {attachments.length > 0 && (
                   <ul className="nx-emp-tc-files">
-                    {attachmentNames.map((name) => (
-                      <li key={name}>{name}</li>
+                    {attachments.map((a) => (
+                      <li key={a.key}>
+                        <span>{a.originalName}</span>
+                        <button
+                          type="button"
+                          className="nx-emp-tc-file-rm"
+                          onClick={() => removeAttachment(a.key)}
+                          aria-label="Gỡ tệp"
+                        >
+                          ×
+                        </button>
+                      </li>
                     ))}
                   </ul>
                 )}

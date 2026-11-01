@@ -50,6 +50,8 @@ function EmployeeLeaveCreatePage() {
   const [handoverId, setHandoverId] = useState('');
   const [handoverPlan, setHandoverPlan] = useState('');
   const [attachmentName, setAttachmentName] = useState('');
+  const [attachmentKey, setAttachmentKey] = useState('');
+  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
   const [msg, setMsg] = useState('');
   const [saving, setSaving] = useState(false);
@@ -107,6 +109,7 @@ function EmployeeLeaveCreatePage() {
       setHandoverId(d.handoverId || '');
       setHandoverPlan(d.handoverPlan || '');
       setAttachmentName(d.attachmentName || '');
+      setAttachmentKey(d.attachmentKey || '');
     } catch {
       /* ignore */
     }
@@ -131,6 +134,7 @@ function EmployeeLeaveCreatePage() {
       handoverId,
       handoverPlan,
       attachmentName,
+      attachmentKey,
     };
     localStorage.setItem(draftKey(user.employeeId), JSON.stringify(payload));
     setMsg('Đã lưu bản nháp trên thiết bị này');
@@ -155,6 +159,7 @@ function EmployeeLeaveCreatePage() {
         reason: buildReasonBody(reason, handoverPlan, leaveFormat),
         handoverEmployeeId: handoverId ? Number(handoverId) : undefined,
         attachmentName: attachmentName.trim() || undefined,
+        attachmentKey: attachmentKey.trim() || undefined,
       });
       if (user?.employeeId) localStorage.removeItem(draftKey(user.employeeId));
       navigate(`/leave/${data.id}`);
@@ -165,8 +170,24 @@ function EmployeeLeaveCreatePage() {
     }
   }
 
-  function onDropFile(file: File | null) {
-    if (file) setAttachmentName(file.name);
+  async function onDropFile(file: File | null) {
+    if (!file) return;
+    setUploading(true);
+    setError('');
+    try {
+      const fd = new FormData();
+      fd.append('file', file, file.name);
+      const { data } = await api.post<{
+        key: string;
+        originalName: string;
+      }>('/leave/files', fd);
+      setAttachmentKey(data.key);
+      setAttachmentName(data.originalName);
+    } catch {
+      setError('Tải tệp chứng từ thất bại (tối đa 10MB)');
+    } finally {
+      setUploading(false);
+    }
   }
 
   const typeLabel =
@@ -345,18 +366,26 @@ function EmployeeLeaveCreatePage() {
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={(e) => {
                   e.preventDefault();
-                  onDropFile(e.dataTransfer.files[0] ?? null);
+                  void onDropFile(e.dataTransfer.files[0] ?? null);
                 }}
               >
-                <p>Kéo thả tệp PDF, PNG, JPG, JPEG (≤ 10MB)</p>
-                <span>Chỉ lưu tên tệp tham chiếu — không upload nhị phân</span>
+                <p>
+                  {uploading
+                    ? 'Đang tải tệp lên…'
+                    : 'Kéo thả hoặc chọn tệp chứng từ'}
+                </p>
+                <span>Hỗ trợ PDF, PNG, JPG · tối đa 10MB</span>
                 <label className="nx-lc-drop-btn">
                   Chọn tệp
                   <input
                     type="file"
                     hidden
                     accept=".pdf,.png,.jpg,.jpeg"
-                    onChange={(e) => onDropFile(e.target.files?.[0] ?? null)}
+                    disabled={uploading || saving}
+                    onChange={(e) => {
+                      void onDropFile(e.target.files?.[0] ?? null);
+                      e.target.value = '';
+                    }}
                   />
                 </label>
                 {attachmentName && <div className="nx-lc-drop-name">{attachmentName}</div>}
@@ -491,6 +520,8 @@ function ManagerLeaveCreatePage() {
   const [handoverId, setHandoverId] = useState('');
   const [urgency, setUrgency] = useState('NORMAL');
   const [attachmentName, setAttachmentName] = useState('');
+  const [attachmentKey, setAttachmentKey] = useState('');
+  const [uploading, setUploading] = useState(false);
   const [quotaPreview, setQuotaPreview] = useState<{
     used: number;
     remaining: number;
@@ -568,6 +599,7 @@ function ManagerLeaveCreatePage() {
         handoverEmployeeId: handoverId ? Number(handoverId) : undefined,
         urgency,
         attachmentName: attachmentName.trim() || undefined,
+        attachmentKey: attachmentKey.trim() || undefined,
         employeeId: canPickEmp && forOther && employeeId ? Number(employeeId) : undefined,
       });
       navigate(`/leave/${data.id}`);
@@ -586,8 +618,24 @@ function ManagerLeaveCreatePage() {
   const eligible =
     leaveType !== 'ANNUAL' || days <= (quotaPreview?.remaining ?? 12);
 
-  function onDropFile(file: File | null) {
-    if (file) setAttachmentName(file.name);
+  async function onDropFile(file: File | null) {
+    if (!file) return;
+    setUploading(true);
+    setError('');
+    try {
+      const fd = new FormData();
+      fd.append('file', file, file.name);
+      const { data } = await api.post<{
+        key: string;
+        originalName: string;
+      }>('/leave/files', fd);
+      setAttachmentKey(data.key);
+      setAttachmentName(data.originalName);
+    } catch {
+      setError('Tải tệp chứng từ thất bại (tối đa 10MB)');
+    } finally {
+      setUploading(false);
+    }
   }
 
   return (
@@ -754,30 +802,31 @@ function ManagerLeaveCreatePage() {
             <h2>
               <span className="nx-lc-num">04</span> Chứng từ đính kèm
             </h2>
-            <div className="nx-lc-field">
-              <label>Tên tệp tham chiếu</label>
-              <input
-                value={attachmentName}
-                onChange={(e) => setAttachmentName(e.target.value)}
-                placeholder="VD: giay_hen_kham.pdf"
-              />
-            </div>
             <div
               className="nx-lc-dropzone"
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => {
                 e.preventDefault();
-                onDropFile(e.dataTransfer.files[0] ?? null);
+                void onDropFile(e.dataTransfer.files[0] ?? null);
               }}
             >
-              <p>Kéo thả tệp vào đây hoặc chọn tệp</p>
-              <span>Chỉ lưu tên tham chiếu — không upload nhị phân</span>
+              <p>
+                {uploading
+                  ? 'Đang tải tệp lên…'
+                  : 'Kéo thả hoặc chọn tệp chứng từ'}
+              </p>
+              <span>Hỗ trợ PDF, PNG, JPG · tối đa 10MB</span>
               <label className="nx-lc-drop-btn">
                 Chọn tệp
                 <input
                   type="file"
                   hidden
-                  onChange={(e) => onDropFile(e.target.files?.[0] ?? null)}
+                  accept=".pdf,.png,.jpg,.jpeg"
+                  disabled={uploading || saving}
+                  onChange={(e) => {
+                    void onDropFile(e.target.files?.[0] ?? null);
+                    e.target.value = '';
+                  }}
                 />
               </label>
               {attachmentName && <div className="nx-lc-drop-name">{attachmentName}</div>}

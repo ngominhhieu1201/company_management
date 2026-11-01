@@ -42,6 +42,9 @@ export class LeaveRequest {
   @Column({ name: 'attachment_name', type: 'varchar', nullable: true })
   attachmentName: string | null;
 
+  @Column({ name: 'attachment_key', type: 'varchar', nullable: true })
+  attachmentKey: string | null;
+
   @Column({ type: 'varchar', default: LeaveStatus.PENDING })
   status: LeaveStatus;
 

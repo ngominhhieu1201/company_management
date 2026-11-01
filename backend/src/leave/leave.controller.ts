@@ -7,8 +7,12 @@ import {
   Patch,
   Post,
   Query,
+  Res,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiCookieAuth, ApiTags } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
@@ -18,6 +22,8 @@ import {
   IsString,
   MinLength,
 } from 'class-validator';
+import { Response } from 'express';
+import { memoryStorage } from 'multer';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { LeaveType, UserRole } from '../common/enums';
@@ -45,6 +51,9 @@ class CreateLeaveDto {
   @IsOptional()
   @IsString()
   attachmentName?: string;
+  @IsOptional()
+  @IsString()
+  attachmentKey?: string;
   @IsOptional()
   @Type(() => Number)
   @IsInt()
@@ -75,6 +84,33 @@ export class LeaveController {
   @Get('next-code')
   nextCode() {
     return this.service.nextCode();
+  }
+
+  @Post('files')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
+  )
+  uploadFile(@UploadedFile() file: Express.Multer.File) {
+    return this.service.saveUploadedFile(file);
+  }
+
+  @Get('files/:key')
+  downloadFile(@Param('key') key: string, @Res() res: Response) {
+    const { stream, key: safe } = this.service.getAttachmentStream(key);
+    const lower = safe.toLowerCase();
+    const type = lower.endsWith('.png')
+      ? 'image/png'
+      : lower.endsWith('.jpg') || lower.endsWith('.jpeg')
+        ? 'image/jpeg'
+        : lower.endsWith('.pdf')
+          ? 'application/pdf'
+          : 'application/octet-stream';
+    res.setHeader('Content-Type', type);
+    res.setHeader('Content-Disposition', `inline; filename="${safe}"`);
+    stream.pipe(res);
   }
 
   @Get()

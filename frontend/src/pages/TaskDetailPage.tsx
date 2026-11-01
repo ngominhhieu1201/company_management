@@ -20,6 +20,13 @@ type Criterion = {
   done: boolean;
 };
 
+type TaskAttachment = {
+  key: string;
+  originalName: string;
+  size: number;
+  mime: string;
+};
+
 type Detail = {
   id: number;
   taskCode: string;
@@ -40,11 +47,14 @@ type Detail = {
   criteria: Criterion[];
   criteriaDone: number;
   criteriaTotal: number;
+  attachments?: TaskAttachment[];
   estimatedHours: number | null;
   actualHours: number | null;
   sla: string;
   updatedAt?: string;
 };
+
+const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 
 type Comment = {
   id: number;
@@ -560,6 +570,27 @@ export default function TaskDetailPage() {
             </section>
 
             <section className="nx-emp-td-card">
+              <h2>Tệp đính kèm</h2>
+              {(detail.attachments?.length ?? 0) === 0 ? (
+                <p className="nx-td-muted">Chưa có tệp đính kèm</p>
+              ) : (
+                <ul className="nx-emp-tc-files">
+                  {detail.attachments!.map((a) => (
+                    <li key={a.key}>
+                      <a
+                        href={`${apiBase}/tasks/files/${encodeURIComponent(a.key)}`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {a.originalName}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+
+            <section className="nx-emp-td-card">
               <h2>Lịch sử thảo luận &amp; hoạt động</h2>
               <div className="nx-td-compose">
                 <textarea
@@ -765,10 +796,25 @@ export default function TaskDetailPage() {
 
           <section className="nx-td-card">
             <h2>Tệp đính kèm</h2>
-            <div className="nx-td-empty">
-              <p>Chưa có tệp đính kèm</p>
-              <span>Tính năng tải lên sẽ được bổ sung sau.</span>
-            </div>
+            {(detail.attachments?.length ?? 0) === 0 ? (
+              <div className="nx-td-empty">
+                <p>Chưa có tệp đính kèm</p>
+              </div>
+            ) : (
+              <ul className="nx-emp-tc-files">
+                {detail.attachments!.map((a) => (
+                  <li key={a.key}>
+                    <a
+                      href={`${apiBase}/tasks/files/${encodeURIComponent(a.key)}`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {a.originalName}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            )}
           </section>
 
           <section className="nx-td-card">

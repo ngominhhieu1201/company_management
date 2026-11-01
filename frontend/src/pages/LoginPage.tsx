@@ -1,7 +1,6 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useMemo, useState } from 'react';
 import { Alert, Form, Spinner } from 'react-bootstrap';
 import { Navigate, useNavigate } from 'react-router-dom';
-import api from '../api/client';
 import quoteAvatar from '../assets/quote-avatar.svg';
 import NexoraLogo from '../components/NexoraLogo';
 import { useAuth } from '../contexts/AuthContext';
@@ -27,12 +26,9 @@ const copy = {
     userLabel: 'Tên đăng nhập hoặc Email công vụ',
     userPh: 'ha.tran@nexora.work',
     passLabel: 'Mật khẩu xác thực',
-    forgot: 'Quên mật khẩu? (Yêu cầu IT)',
     remember: 'Ghi nhớ phiên đăng nhập (30 ngày)',
     submit: 'ĐĂNG NHẬP HỆ THỐNG',
-    validEmail: 'Hợp lệ (@nexora.work)',
     validUser: 'Hợp lệ',
-    invalidEmail: 'Email phải @nexora.work',
   },
   EN: {
     headline: 'Unified digital workspace for the enterprise',
@@ -51,12 +47,9 @@ const copy = {
     userLabel: 'Username or corporate email',
     userPh: 'ha.tran@nexora.work',
     passLabel: 'Authentication password',
-    forgot: 'Forgot password? (Contact IT)',
     remember: 'Remember session (30 days)',
     submit: 'SIGN IN TO SYSTEM',
-    validEmail: 'Valid (@nexora.work)',
     validUser: 'Valid',
-    invalidEmail: 'Must be @nexora.work',
   },
 };
 
@@ -107,31 +100,11 @@ export default function LoginPage() {
   const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [sessionIp, setSessionIp] = useState('—');
-  const [latencyMs, setLatencyMs] = useState(12);
-
-  useEffect(() => {
-    const started = performance.now();
-    api
-      .get('/auth/session-info')
-      .then((r) => {
-        setSessionIp(r.data.sessionIp || '—');
-        setLatencyMs(
-          r.data.latencyMs ?? Math.round(performance.now() - started),
-        );
-      })
-      .catch(() => setLatencyMs(Math.round(performance.now() - started)));
-  }, []);
 
   const identityHint = useMemo(() => {
     const v = username.trim();
-    if (!v) return null;
-    if (v.includes('@')) {
-      return v.toLowerCase().endsWith('@nexora.work')
-        ? { ok: true, text: t.validEmail }
-        : { ok: false, text: t.invalidEmail };
-    }
-    return v.length >= 3 ? { ok: true, text: t.validUser } : null;
+    if (v.length < 3) return null;
+    return { ok: true, text: t.validUser };
   }, [username, t]);
 
   if (!loading && user) return <Navigate to="/dashboard" replace />;
@@ -139,10 +112,6 @@ export default function LoginPage() {
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError('');
-    if (identityHint && !identityHint.ok) {
-      setError(identityHint.text);
-      return;
-    }
     setSubmitting(true);
     try {
       await login(username.trim(), password, rememberMe);
@@ -203,9 +172,8 @@ export default function LoginPage() {
           <div className="nx-hero-tags">
             <span className="nx-pill">
               <span className="nx-dot" />
-              ENTERPRISE BUILD V2.4.8
+              ENTERPRISE
             </span>
-            <span className="nx-hero-sync">NTP Sync Active</span>
           </div>
 
           <h1>{t.headline}</h1>
@@ -268,10 +236,6 @@ export default function LoginPage() {
                 <small>{t.portalSub}</small>
               </div>
             </div>
-            <span className="nx-latency">
-              <span className="nx-dot nx-dot-sm" />
-              NTP Sync Active · {latencyMs}ms
-            </span>
           </div>
 
           {error && (
@@ -308,9 +272,6 @@ export default function LoginPage() {
             <div className="nx-field">
               <div className="nx-label-row">
                 <Form.Label>{t.passLabel}</Form.Label>
-                <button type="button" className="nx-link" tabIndex={-1}>
-                  {t.forgot}
-                </button>
               </div>
               <div className="nx-input-wrap">
                 <span className="nx-input-ico" aria-hidden>
@@ -355,7 +316,6 @@ export default function LoginPage() {
                 checked={rememberMe}
                 onChange={(e) => setRememberMe(e.target.checked)}
               />
-              <span className="nx-2fa">2FA HARDWARE TOKEN READY</span>
             </div>
 
             <button type="submit" className="nx-submit" disabled={submitting}>
@@ -383,38 +343,12 @@ export default function LoginPage() {
               <div>Helpdesk: 1900 636 868</div>
               <div>security@nexora.work</div>
             </div>
-            <div className="nx-session-ip">SESSION IP: {sessionIp}</div>
           </div>
-          <p className="nx-demo-hint">
-            Demo: admin / Admin@123 · manager@nexora.work / Manager@123
-          </p>
         </section>
       </main>
 
       <footer className="nx-footer">
-        <div className="nx-badges">
-          <span>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
-              <path d="M12 3l8 4v5c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V7l8-4Z" stroke="#006C49" strokeWidth="1.5" />
-            </svg>
-            ISO/IEC 27001
-          </span>
-          <span>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
-              <rect x="5" y="11" width="14" height="10" rx="2" stroke="#006C49" strokeWidth="1.5" />
-              <path d="M8 11V8a4 4 0 1 1 8 0v3" stroke="#006C49" strokeWidth="1.5" />
-            </svg>
-            SHA-256 GCM
-          </span>
-          <span>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
-              <path d="M4 12h16M12 4v16" stroke="#006C49" strokeWidth="1.5" />
-              <circle cx="12" cy="12" r="9" stroke="#006C49" strokeWidth="1.5" />
-            </svg>
-            GDPR COMPLIANT
-          </span>
-        </div>
-        <div>© 2025 Nexora WorkSuite Enterprise</div>
+        <div>© 2026 Nexora WorkSuite Enterprise</div>
       </footer>
     </div>
   );

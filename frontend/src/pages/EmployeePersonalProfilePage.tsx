@@ -111,12 +111,6 @@ function requestUpdate(email: string) {
   window.location.href = `mailto:${hr}?subject=${subject}&body=${body}`;
 }
 
-function printPdfStub() {
-  window.alert(
-    'Chức năng in sơ yếu lý lịch (PDF) đang được hoàn thiện. Bạn có thể dùng in trang (Ctrl+P) tạm thời.',
-  );
-}
-
 export default function EmployeePersonalProfilePage() {
   const { user } = useAuth();
   const [detail, setDetail] = useState<EmployeeDetail | null>(null);
@@ -216,13 +210,6 @@ export default function EmployeePersonalProfilePage() {
               <path d="M21 15a4 4 0 0 1-4 4H7l-4 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v8Z" />
             </svg>
             Yêu cầu cập nhật thông tin
-          </button>
-          <button type="button" className="nx-btn-primary" onClick={printPdfStub}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-              <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6Z" />
-              <path d="M14 3v6h6M8 13h8M8 17h5" />
-            </svg>
-            In sơ yếu lý lịch (PDF)
           </button>
         </div>
       </div>

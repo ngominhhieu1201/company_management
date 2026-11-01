@@ -17,6 +17,7 @@ type Row = {
   reason: string | null;
   createdAt: string;
   attachmentName: string | null;
+  attachmentKey?: string | null;
   reviewerName?: string | null;
   reviewedAt?: string | null;
   handover: { fullName: string; employeeCode?: string; position?: string | null } | null;
@@ -107,7 +108,10 @@ type Draft = {
   reason: string;
   handoverId: string;
   attachmentName: string;
+  attachmentKey: string;
 };
+
+const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 
 function slaHint(createdAt: string, urgency: string) {
   const created = new Date(createdAt).getTime();
@@ -143,6 +147,8 @@ export default function EmployeeLeavePage() {
   const [reason, setReason] = useState('');
   const [handoverId, setHandoverId] = useState('');
   const [attachmentName, setAttachmentName] = useState('');
+  const [attachmentKey, setAttachmentKey] = useState('');
+  const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const year = new Date().getFullYear();
@@ -252,6 +258,7 @@ export default function EmployeeLeavePage() {
       setReason(d.reason || '');
       setHandoverId(d.handoverId || '');
       setAttachmentName(d.attachmentName || '');
+      setAttachmentKey(d.attachmentKey || '');
     } catch {
       /* ignore */
     }
@@ -271,6 +278,7 @@ export default function EmployeeLeavePage() {
       reason,
       handoverId,
       attachmentName,
+      attachmentKey,
     };
     localStorage.setItem(draftKey(user.employeeId), JSON.stringify(payload));
     setMsg('Đã lưu bản nháp trên thiết bị này');
@@ -295,6 +303,7 @@ export default function EmployeeLeavePage() {
         reason: reason.trim(),
         handoverEmployeeId: handoverId ? Number(handoverId) : undefined,
         attachmentName: attachmentName.trim() || undefined,
+        attachmentKey: attachmentKey.trim() || undefined,
       });
       if (user?.employeeId) localStorage.removeItem(draftKey(user.employeeId));
       setReason('');
@@ -302,6 +311,7 @@ export default function EmployeeLeavePage() {
       setEndDate('');
       setHandoverId('');
       setAttachmentName('');
+      setAttachmentKey('');
       closeForm();
       setMsg('Đã gửi đơn lên quản lý phê duyệt');
       await refresh();
@@ -326,8 +336,24 @@ export default function EmployeeLeavePage() {
     }
   }
 
-  function onDropFile(file: File | null) {
-    if (file) setAttachmentName(file.name);
+  async function onDropFile(file: File | null) {
+    if (!file) return;
+    setUploading(true);
+    setError('');
+    try {
+      const fd = new FormData();
+      fd.append('file', file, file.name);
+      const { data } = await api.post<{
+        key: string;
+        originalName: string;
+      }>('/leave/files', fd);
+      setAttachmentKey(data.key);
+      setAttachmentName(data.originalName);
+    } catch {
+      setError('Tải tệp chứng từ thất bại (tối đa 10MB)');
+    } finally {
+      setUploading(false);
+    }
   }
 
   const annualQuota = dash?.annualQuota ?? 12;
@@ -479,18 +505,26 @@ export default function EmployeeLeavePage() {
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={(e) => {
                   e.preventDefault();
-                  onDropFile(e.dataTransfer.files[0] ?? null);
+                  void onDropFile(e.dataTransfer.files[0] ?? null);
                 }}
               >
-                <p>Tải lên chứng từ (PDF, PNG, JPG ≤5MB)</p>
-                <span>Chỉ lưu tên tệp tham chiếu — không upload nhị phân</span>
+                <p>
+                  {uploading
+                    ? 'Đang tải tệp lên…'
+                    : 'Kéo thả hoặc chọn tệp chứng từ'}
+                </p>
+                <span>Hỗ trợ PDF, PNG, JPG · tối đa 10MB</span>
                 <label className="nx-lc-drop-btn">
                   Chọn tệp
                   <input
                     type="file"
                     hidden
                     accept=".pdf,.png,.jpg,.jpeg"
-                    onChange={(e) => onDropFile(e.target.files?.[0] ?? null)}
+                    disabled={uploading || saving}
+                    onChange={(e) => {
+                      void onDropFile(e.target.files?.[0] ?? null);
+                      e.target.value = '';
+                    }}
                   />
                 </label>
                 {attachmentName && <div className="nx-lc-drop-name">{attachmentName}</div>}
@@ -600,9 +634,21 @@ export default function EmployeeLeavePage() {
                     ) : (
                       <span className="nx-lv-muted">Không chỉ định</span>
                     )}
-                    {r.attachmentName && (
-                      <span className="nx-lv-attach nx-emp-lv-attach">{r.attachmentName}</span>
-                    )}
+                    {r.attachmentName &&
+                      (r.attachmentKey ? (
+                        <a
+                          className="nx-lv-attach nx-emp-lv-attach"
+                          href={`${apiBase}/leave/files/${encodeURIComponent(r.attachmentKey)}`}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {r.attachmentName}
+                        </a>
+                      ) : (
+                        <span className="nx-lv-attach nx-emp-lv-attach">
+                          {r.attachmentName}
+                        </span>
+                      ))}
                   </td>
                   <td>
                     <div className="nx-emp-lv-steps">

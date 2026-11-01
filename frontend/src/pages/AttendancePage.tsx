@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Spinner } from 'react-bootstrap';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../api/client';
+import MonthPicker from '../components/MonthPicker';
 import { useAuth } from '../contexts/AuthContext';
 import '../styles/attendance.css';
 
@@ -566,12 +567,7 @@ export default function AttendancePage() {
                   placeholder="Tìm ngày, mã bản ghi, ca…"
                 />
               </label>
-              <input
-                className="nx-att-date"
-                type="month"
-                value={monthFilter}
-                onChange={(e) => setMonthFilter(e.target.value)}
-              />
+              <MonthPicker value={monthFilter} onChange={setMonthFilter} />
               <select
                 value={statusFilter}
                 onChange={(e) => {

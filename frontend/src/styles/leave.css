@@ -98,7 +98,8 @@
 .nx-lc-dropzone{border:2px dashed #cfd8d4;border-radius:14px;padding:1.25rem;text-align:center;background:#fafbfa;margin-top:.5rem}
 .nx-lc-dropzone p{margin:0 0 .25rem;font-weight:700;font-size:.88rem}
 .nx-lc-dropzone span{font-size:.75rem;color:var(--nx-muted)}
-.nx-lc-drop-btn{display:inline-flex;margin-top:.75rem;padding:.45rem .85rem;border-radius:10px;background:var(--nx-ink);color:#fff;font-weight:700;font-size:.8rem;cursor:pointer}
+.nx-lc-drop-btn{display:inline-flex;margin-top:.75rem;padding:.5rem 1rem;border-radius:10px;background:#004036;color:#fff;font-weight:800;font-size:.82rem;cursor:pointer;border:0}
+.nx-lc-drop-btn:hover{background:#00594c;color:#fff}
 .nx-lc-drop-name{margin-top:.65rem;font-size:.82rem;font-weight:700;color:#1565c0}
 .nx-lc-aside{position:sticky;top:1rem}
 .nx-lc-side-summary .nx-lc-sum-row{display:flex;justify-content:space-between;gap:.5rem;font-size:.85rem;padding:.4rem 0;border-bottom:1px solid #eef2f0}

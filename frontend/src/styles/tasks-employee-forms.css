@@ -154,8 +154,30 @@
 }
 .nx-emp-tc-files {
   margin: 0.5rem 0 0;
-  padding-left: 1.1rem;
+  padding: 0;
+  list-style: none;
   font-size: 0.82rem;
+}
+.nx-emp-tc-files li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  background: #f4f7f6;
+}
+.nx-emp-tc-files li + li {
+  margin-top: 0.35rem;
+}
+.nx-emp-tc-file-rm {
+  border: none;
+  background: transparent;
+  color: #8a3b3b;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.25rem;
 }
 .nx-emp-tc-approver .role {
   display: inline-flex;

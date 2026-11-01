@@ -66,6 +66,10 @@ export class Task {
   @Column({ type: 'text', nullable: true })
   criteria: string | null;
 
+  /** JSON: [{ key, originalName, size, mime }] */
+  @Column({ type: 'text', nullable: true })
+  attachments: string | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

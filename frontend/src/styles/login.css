@@ -134,12 +134,12 @@
 }
 
 .nx-main {
-  flex: 1;
+  flex: 0 0 auto;
   display: grid;
   /* SVG: left 508.33 / right 719.67 */
   grid-template-columns: minmax(280px, 40%) minmax(0, 1fr);
   gap: 1.25rem;
-  padding: 0.35rem 1.75rem 0.65rem;
+  padding: 0.35rem 1.75rem 0.35rem;
   max-width: 1280px;
   width: 100%;
   margin: 0 auto;
@@ -154,16 +154,16 @@
   background: #004036;
   color: #fff;
   border-radius: 12px;
-  padding: 1.55rem 1.7rem 1.2rem;
+  padding: 1.55rem 1.7rem 1.75rem;
   box-shadow:
     0 8px 10px rgba(0, 0, 0, 0.1),
     0 20px 25px rgba(0, 0, 0, 0.1);
   display: flex;
   flex-direction: column;
-  /* SVG panel height ≈ 577 */
+  gap: 0.55rem;
   min-height: 577px;
-  height: 577px;
-  max-height: 577px;
+  height: auto;
+  max-height: none;
   min-width: 0;
 }
 
@@ -187,7 +187,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
-  margin-bottom: 1.35rem;
+  margin-bottom: 0.55rem;
 }
 
 .nx-pill {
@@ -233,7 +233,7 @@
 }
 
 .nx-hero h1 {
-  margin: 0 0 0.7rem;
+  margin: 0;
   font-size: clamp(1.45rem, 2vw, 1.85rem);
   line-height: 1.22;
   font-weight: 750;
@@ -242,7 +242,7 @@
 }
 
 .nx-hero-sub {
-  margin: 0 0 1.15rem;
+  margin: 0 0 0.4rem;
   color: rgba(255, 255, 255, 0.72);
   font-size: 0.88rem;
   line-height: 1.5;
@@ -291,13 +291,15 @@
 }
 
 .nx-quote {
-  margin-top: auto;
+  margin: 0;
   display: flex;
   gap: 0.85rem;
-  padding: 0.85rem 0.95rem;
+  align-items: flex-start;
+  padding: 0.7rem 0.85rem;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.1);
   backdrop-filter: blur(4px);
+  flex-shrink: 0;
 }
 
 .nx-avatar {
@@ -569,7 +571,7 @@
   padding-top: 0.7rem;
   border-top: 1px solid rgba(190, 201, 197, 0.45);
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 1rem;
   font-size: 0.74rem;
   color: var(--nx-muted);
@@ -592,10 +594,10 @@
 
 .nx-footer {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   align-items: center;
   gap: 1rem;
-  padding: 0.5rem 2.5rem 0.9rem;
+  padding: 0.35rem 2.5rem 1rem;
   max-width: 1280px;
   width: 100%;
   margin: 0 auto;

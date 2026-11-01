@@ -5,6 +5,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { createReadStream, existsSync, mkdirSync, writeFileSync } from 'fs';
+import { extname, join } from 'path';
+import { randomUUID } from 'crypto';
 import { In, Repository } from 'typeorm';
 import { LeaveStatus, LeaveType, UserRole } from '../common/enums';
 import { Department } from '../departments/department.entity';
@@ -14,6 +17,13 @@ import { User } from '../users/user.entity';
 import { LeaveRequest } from './leave-request.entity';
 
 type AuthUser = { id: number; role: UserRole; employeeId: number | null };
+
+export type LeaveAttachmentMeta = {
+  key: string;
+  originalName: string;
+  size: number;
+  mime: string;
+};
 
 const ANNUAL_QUOTA = 12;
 
@@ -37,6 +47,8 @@ function todayStr() {
 
 @Injectable()
 export class LeaveService {
+  private readonly uploadDir = join(process.cwd(), 'uploads', 'leave');
+
   constructor(
     @InjectRepository(LeaveRequest)
     private readonly repo: Repository<LeaveRequest>,
@@ -47,7 +59,50 @@ export class LeaveService {
     @InjectRepository(User)
     private readonly users: Repository<User>,
     private readonly logs: SystemLogsService,
-  ) {}
+  ) {
+    if (!existsSync(this.uploadDir)) {
+      mkdirSync(this.uploadDir, { recursive: true });
+    }
+  }
+
+  saveUploadedFile(file: Express.Multer.File): LeaveAttachmentMeta {
+    if (!file?.buffer?.length) throw new BadRequestException('Empty file');
+    const max = 10 * 1024 * 1024;
+    if (file.size > max) throw new BadRequestException('File quá lớn (tối đa 10MB)');
+    const allowed = [
+      '.pdf',
+      '.png',
+      '.jpg',
+      '.jpeg',
+      '.gif',
+      '.webp',
+      '.doc',
+      '.docx',
+      '.xls',
+      '.xlsx',
+      '.txt',
+      '.zip',
+    ];
+    const ext = extname(file.originalname || '').toLowerCase();
+    if (ext && !allowed.includes(ext)) {
+      throw new BadRequestException('Định dạng tệp không được hỗ trợ');
+    }
+    const key = `${randomUUID()}${ext || ''}`;
+    writeFileSync(join(this.uploadDir, key), file.buffer);
+    return {
+      key,
+      originalName: file.originalname || key,
+      size: file.size,
+      mime: file.mimetype || 'application/octet-stream',
+    };
+  }
+
+  getAttachmentStream(key: string) {
+    const safe = key.replace(/[/\\]/g, '');
+    const path = join(this.uploadDir, safe);
+    if (!existsSync(path)) throw new NotFoundException('File not found');
+    return { stream: createReadStream(path), key: safe };
+  }
 
   private async scoped(user: AuthUser) {
     let list = await this.repo.find({ order: { id: 'DESC' } });
@@ -156,6 +211,7 @@ export class LeaveService {
           : null,
         urgency: r.urgency || 'NORMAL',
         attachmentName: r.attachmentName,
+        attachmentKey: r.attachmentKey,
         status: r.status,
         reviewBy: r.reviewBy,
         reviewedAt: r.reviewedAt,
@@ -338,6 +394,7 @@ export class LeaveService {
       handoverEmployeeId?: number;
       urgency?: string;
       attachmentName?: string;
+      attachmentKey?: string;
       employeeId?: number;
     },
   ) {
@@ -379,6 +436,7 @@ export class LeaveService {
         handoverEmployeeId: data.handoverEmployeeId ?? null,
         urgency: data.urgency === 'URGENT' ? 'URGENT' : 'NORMAL',
         attachmentName: data.attachmentName?.trim() || null,
+        attachmentKey: data.attachmentKey?.trim() || null,
         status: LeaveStatus.PENDING,
       }),
     );

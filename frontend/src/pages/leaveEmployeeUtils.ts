@@ -83,6 +83,7 @@ export type LeaveDraft = {
   handoverId: string;
   handoverPlan: string;
   attachmentName: string;
+  attachmentKey?: string;
 };
 
 const HANDOVER_SEP = '\n\n[Ghi chú bàn giao]:';

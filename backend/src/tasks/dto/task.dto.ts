@@ -31,6 +31,26 @@ export class CriterionDto {
   done?: boolean;
 }
 
+export class TaskAttachmentDto {
+  @IsString()
+  @MinLength(1)
+  key: string;
+
+  @IsString()
+  @MinLength(1)
+  originalName: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  size?: number;
+
+  @IsOptional()
+  @IsString()
+  mime?: string;
+}
+
 export class CreateTaskDto {
   @IsString()
   @MinLength(2)
@@ -95,6 +115,12 @@ export class CreateTaskDto {
   @ValidateNested({ each: true })
   @Type(() => CriterionDto)
   criteria?: CriterionDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => TaskAttachmentDto)
+  attachments?: TaskAttachmentDto[];
 }
 
 export class UpdateTaskDto {

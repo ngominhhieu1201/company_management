@@ -6,6 +6,8 @@ import { useAuth } from '../contexts/AuthContext';
 import EmployeeLeavePage from './EmployeeLeavePage';
 import '../styles/leave.css';
 
+const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+
 type Row = {
   id: number;
   leaveCode: string;
@@ -18,6 +20,7 @@ type Row = {
   reason: string | null;
   createdAt: string;
   attachmentName: string | null;
+  attachmentKey?: string | null;
   reviewerName?: string | null;
   reviewedAt?: string | null;
   employee: {
@@ -368,7 +371,18 @@ function ManagerLeavePage() {
                   <td>{r.handover?.fullName || <span className="nx-lv-muted">Chưa gán</span>}</td>
                   <td>
                     {r.attachmentName ? (
-                      <span className="nx-lv-attach">{r.attachmentName}</span>
+                      r.attachmentKey ? (
+                        <a
+                          className="nx-lv-attach"
+                          href={`${apiBase}/leave/files/${encodeURIComponent(r.attachmentKey)}`}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {r.attachmentName}
+                        </a>
+                      ) : (
+                        <span className="nx-lv-attach">{r.attachmentName}</span>
+                      )
                     ) : (
                       <span className="nx-lv-muted">Không yêu cầu</span>
                     )}

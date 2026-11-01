@@ -15,6 +15,8 @@ import {
 } from './leaveEmployeeUtils';
 import '../styles/leave.css';
 
+const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+
 type Detail = {
   id: number;
   leaveCode: string;
@@ -26,6 +28,7 @@ type Detail = {
   status: string;
   urgency: string;
   attachmentName: string | null;
+  attachmentKey?: string | null;
   reviewComment: string | null;
   reviewerName: string | null;
   reviewedAt: string | null;
@@ -225,8 +228,18 @@ function EmployeeLeaveDetailView({
               <div className="nx-emp-lv-detail-file">
                 <span className="icon" aria-hidden />
                 <div>
-                  <strong>{detail.attachmentName}</strong>
-                  <span className="nx-lv-sub">Tệp tham chiếu (không upload nhị phân)</span>
+                  {detail.attachmentKey ? (
+                    <a
+                      href={`${apiBase}/leave/files/${encodeURIComponent(detail.attachmentKey)}`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <strong>{detail.attachmentName}</strong>
+                    </a>
+                  ) : (
+                    <strong>{detail.attachmentName}</strong>
+                  )}
+                  <span className="nx-lv-sub">Tệp đính kèm</span>
                 </div>
               </div>
             )}
@@ -581,7 +594,23 @@ export default function LeaveDetailPage() {
               </div>
               <div>
                 <span>Chứng từ</span>
-                <strong>{detail.attachmentName || 'Không yêu cầu'}</strong>
+                <strong>
+                  {detail.attachmentName ? (
+                    detail.attachmentKey ? (
+                      <a
+                        href={`${apiBase}/leave/files/${encodeURIComponent(detail.attachmentKey)}`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {detail.attachmentName}
+                      </a>
+                    ) : (
+                      detail.attachmentName
+                    )
+                  ) : (
+                    'Không yêu cầu'
+                  )}
+                </strong>
               </div>
             </div>
           </section>

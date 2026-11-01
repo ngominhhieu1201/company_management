@@ -17,6 +17,22 @@
 .nx-att-filters .search{flex:1;min-width:200px;display:flex;gap:.4rem;align-items:center;border:1px solid var(--nx-line);border-radius:10px;padding:.4rem .7rem;background:#fafbfa}
 .nx-att-filters .search input{border:0;outline:0;flex:1;background:transparent;font:inherit}
 .nx-att-filters select,input[type=date].nx-att-date{border:1px solid var(--nx-line);border-radius:10px;padding:.4rem .7rem;font:inherit}
+.nx-month-picker{position:relative;flex-shrink:0}
+.nx-month-picker-trigger{display:inline-flex;align-items:center;gap:.55rem;border:1px solid var(--nx-line);border-radius:10px;padding:.42rem .75rem;font:inherit;font-weight:700;color:var(--nx-ink-deep);background:#fff;cursor:pointer;min-width:9.5rem;justify-content:space-between}
+.nx-month-picker-trigger:hover{border-color:#b7ccc4;background:#f7fbf9}
+.nx-month-picker-trigger svg{color:#6b7f78;flex-shrink:0}
+.nx-month-picker-pop{position:absolute;top:calc(100% + 6px);left:0;z-index:40;width:248px;background:#fff;border:1px solid #d7e5df;border-radius:14px;box-shadow:0 12px 28px rgba(0,64,54,.14);padding:.65rem .7rem .55rem}
+.nx-month-picker-year{display:flex;align-items:center;justify-content:space-between;gap:.35rem;margin-bottom:.55rem;padding:0 .15rem}
+.nx-month-picker-year strong{font-size:.95rem;font-weight:800;color:var(--nx-ink-deep)}
+.nx-month-picker-year button{width:30px;height:30px;border:0;border-radius:8px;background:#eef5f2;color:#004036;font-size:1.1rem;font-weight:700;cursor:pointer;line-height:1}
+.nx-month-picker-year button:hover{background:#dceee6}
+.nx-month-picker-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:.35rem}
+.nx-month-picker-grid button{border:0;border-radius:10px;padding:.55rem .25rem;font:inherit;font-size:.82rem;font-weight:700;color:#3d524b;background:#f4f8f6;cursor:pointer}
+.nx-month-picker-grid button:hover{background:#e6f2ed;color:#004036}
+.nx-month-picker-grid button.active{background:#006c49;color:#fff;box-shadow:0 2px 8px rgba(0,108,73,.28)}
+.nx-month-picker-foot{display:flex;justify-content:flex-end;margin-top:.5rem;padding-top:.4rem;border-top:1px solid #eef2f0}
+.nx-month-picker-foot .ghost{border:0;background:transparent;color:#006c49;font:inherit;font-size:.8rem;font-weight:800;cursor:pointer;padding:.25rem .35rem}
+.nx-month-picker-foot .ghost:hover{text-decoration:underline}
 .nx-att-chips{display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:.85rem}
 .nx-att-chip{border:1px solid var(--nx-line);background:#fff;border-radius:999px;padding:.28rem .7rem;font-size:.8rem;font-weight:700;cursor:pointer}
 .nx-att-chip.active{background:var(--nx-sage);border-color:#cfe8dc}

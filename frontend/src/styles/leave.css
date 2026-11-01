@@ -11,7 +11,7 @@
 .nx-lv-filters{display:flex;flex-wrap:wrap;gap:.5rem;background:#fff;border:1px solid var(--nx-line);border-radius:14px;padding:.7rem 1rem;margin-bottom:.65rem}
 .nx-lv-filters .search{flex:1;min-width:200px;border:1px solid var(--nx-line);border-radius:10px;padding:.4rem .7rem;background:#fafbfa}
 .nx-lv-filters .search input{border:0;outline:0;width:100%;background:transparent;font:inherit}
-.nx-lv-filters select{border:1px solid var(--nx-line);border-radius:10px;padding:.4rem .7rem;font:inherit}
+.nx-lv-filters select{min-width:9rem}
 .nx-lv-chips{display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:.85rem}
 .nx-lv-chip{border:1px solid var(--nx-line);background:#fff;border-radius:999px;padding:.28rem .7rem;font-size:.8rem;font-weight:700;cursor:pointer}
 .nx-lv-chip.active{background:var(--nx-sage);border-color:#cfe8dc}

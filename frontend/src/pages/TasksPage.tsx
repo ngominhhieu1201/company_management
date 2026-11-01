@@ -925,13 +925,15 @@ export default function TasksPage() {
               Hiển thị {(page - 1) * pageSize + (total ? 1 : 0)}–
               {Math.min(page * pageSize, total)} trong tổng số {total} công việc
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div className="nx-tk-pager-size">
               <select
+                className="nx-select"
                 value={pageSize}
                 onChange={(e) => {
                   setPage(1);
                   setPageSize(Number(e.target.value));
                 }}
+                aria-label="Số dòng mỗi trang"
               >
                 <option value={8}>8 / trang</option>
                 <option value={10}>10 / trang</option>

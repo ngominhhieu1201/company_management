@@ -98,8 +98,12 @@
   border-radius: 12px;
   padding: 0.65rem 0.85rem;
   font: inherit;
-  background: #fff;
+  background-color: #fff;
   color: var(--nx-ink-deep);
+}
+
+.nx-ec-field select {
+  padding-right: 2rem;
 }
 
 .nx-ec-field textarea {
@@ -204,9 +208,18 @@
 .nx-ec-contract {
   border: 1px solid var(--nx-line);
   border-radius: 12px;
-  padding: 0.75rem 0.85rem;
+  padding: 0.7rem 0.85rem;
   cursor: pointer;
-  display: block;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  margin: 0;
+  background: #fff;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.nx-ec-contract:hover {
+  border-color: #8aa39a;
 }
 
 .nx-ec-contract.active {
@@ -215,18 +228,47 @@
   box-shadow: inset 0 0 0 1px var(--nx-ink);
 }
 
-.nx-ec-contract input {
-  margin-right: 0.4rem;
+.nx-ec-contract input[type='radio'] {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: 0 0 auto;
+  width: 1rem;
+  height: 1rem;
+  min-width: 1rem;
+  min-height: 1rem;
+  margin: 0.15rem 0 0;
+  border: 1.5px solid #8a9a94;
+  border-radius: 50%;
+  background: #fff;
+  cursor: pointer;
+  box-shadow: none;
 }
 
-.nx-ec-contract strong {
+.nx-ec-contract input[type='radio']:checked {
+  border-color: var(--nx-ink);
+  background:
+    radial-gradient(circle, var(--nx-ink) 0 38%, transparent 40%),
+    #fff;
+}
+
+.nx-ec-contract-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  min-width: 0;
+}
+
+.nx-ec-contract-text strong {
   display: block;
   font-size: 0.85rem;
+  line-height: 1.25;
+  color: var(--nx-ink);
 }
 
-.nx-ec-contract span {
+.nx-ec-contract-text span {
   font-size: 0.72rem;
   color: var(--nx-muted);
+  line-height: 1.3;
 }
 
 .nx-ec-hint {

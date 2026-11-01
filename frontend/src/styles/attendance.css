@@ -16,7 +16,8 @@
 .nx-att-filters{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;background:#fff;border:1px solid var(--nx-line);border-radius:14px;padding:.7rem 1rem;margin-bottom:.65rem}
 .nx-att-filters .search{flex:1;min-width:200px;display:flex;gap:.4rem;align-items:center;border:1px solid var(--nx-line);border-radius:10px;padding:.4rem .7rem;background:#fafbfa}
 .nx-att-filters .search input{border:0;outline:0;flex:1;background:transparent;font:inherit}
-.nx-att-filters select,input[type=date].nx-att-date{border:1px solid var(--nx-line);border-radius:10px;padding:.4rem .7rem;font:inherit}
+.nx-att-filters select{min-width:9rem}
+input[type=date].nx-att-date{border:1px solid var(--nx-line);border-radius:10px;padding:.4rem .7rem;font:inherit;background:#fff}
 .nx-month-picker{position:relative;flex-shrink:0}
 .nx-month-picker-trigger{display:inline-flex;align-items:center;gap:.55rem;border:1px solid var(--nx-line);border-radius:10px;padding:.42rem .75rem;font:inherit;font-weight:700;color:var(--nx-ink-deep);background:#fff;cursor:pointer;min-width:9.5rem;justify-content:space-between}
 .nx-month-picker-trigger:hover{border-color:#b7ccc4;background:#f7fbf9}

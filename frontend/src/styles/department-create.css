@@ -90,8 +90,12 @@
   border-radius: 12px;
   padding: 0.65rem 0.85rem;
   font: inherit;
-  background: #fff;
+  background-color: #fff;
   color: var(--nx-ink-deep);
+}
+
+.nx-dc-field select {
+  padding-right: 2rem;
 }
 
 .nx-dc-field textarea {

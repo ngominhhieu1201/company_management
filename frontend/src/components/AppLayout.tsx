@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import NexoraLogo from './NexoraLogo';
+import NotificationBell from './NotificationBell';
 
 const links: {
   to: string;
@@ -247,20 +248,7 @@ export default function AppLayout() {
             />
           </label>
           <div className="nx-top-actions">
-            <button type="button" className="nx-icon-btn" aria-label="Thông báo">
-              <svg
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-              >
-                <path d="M6 16h12l-1.2-1.5a6.5 6.5 0 0 1-1.3-4V9a4.5 4.5 0 1 0-9 0v1.5a6.5 6.5 0 0 1-1.3 4L6 16Z" />
-                <path d="M10 18a2 2 0 0 0 4 0" />
-              </svg>
-              <span className="dot" />
-            </button>
+            <NotificationBell />
             <span className="nx-role-chip">
               {user?.role === 'ADMIN' ? 'Admin' : user?.role}
               <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">

@@ -471,8 +471,10 @@ export default function EmployeeCreatePage() {
                     checked={form.contractType === val}
                     onChange={() => setField('contractType', val)}
                   />
-                  <strong>{title}</strong>
-                  <span>{sub}</span>
+                  <span className="nx-ec-contract-text">
+                    <strong>{title}</strong>
+                    <span>{sub}</span>
+                  </span>
                 </label>
               ))}
             </div>

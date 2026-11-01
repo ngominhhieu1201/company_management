@@ -614,13 +614,15 @@ export default function EmployeesPage() {
             <div className="nx-emp-pager-info">
               Hiển thị {rangeStart} – {rangeEnd} trong tổng số {total} nhân sự
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div className="nx-emp-pager-size">
               <select
+                className="nx-select"
                 value={pageSize}
                 onChange={(e) => {
                   setPage(1);
                   setPageSize(Number(e.target.value));
                 }}
+                aria-label="Số dòng mỗi trang"
               >
                 <option value={10}>10 / trang</option>
                 <option value={25}>25 / trang</option>
@@ -968,16 +970,16 @@ export default function EmployeesPage() {
           <div className="nx-emp-pager-info">
             Hiển thị {rangeStart}–{rangeEnd} trong tổng số {total} nhân sự
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: '0.82rem', color: '#6f7976' }}>
-              Mỗi trang
-            </span>
+          <div className="nx-emp-pager-size">
+            <span className="nx-emp-pager-size-lbl">Mỗi trang</span>
             <select
+              className="nx-select"
               value={pageSize}
               onChange={(e) => {
                 setPage(1);
                 setPageSize(Number(e.target.value));
               }}
+              aria-label="Số dòng mỗi trang"
             >
               <option value={10}>10</option>
               <option value={25}>25</option>

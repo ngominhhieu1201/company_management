@@ -94,11 +94,7 @@
 }
 
 .nx-dept-filters select {
-  border: 1px solid var(--nx-line);
-  border-radius: 10px;
-  padding: 0.45rem 0.7rem;
-  font: inherit;
-  background: #fff;
+  min-width: 9rem;
 }
 
 .nx-dept-chips {

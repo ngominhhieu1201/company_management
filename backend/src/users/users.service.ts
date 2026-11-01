@@ -136,7 +136,12 @@ export class UsersService {
 
   /** Đăng nhập bằng username hoặc email công vụ (@nexora.work) */
   async findByLoginIdentifier(identifier: string) {
-    const raw = identifier.trim();
+    let raw = identifier.trim();
+    // UI từng có prefix "@" — chấp nhận "@admin" như "admin"
+    if (raw.startsWith('@') && !raw.includes('.', raw.indexOf('@') + 1)) {
+      const maybeUser = raw.slice(1).trim();
+      if (maybeUser && !maybeUser.includes('@')) raw = maybeUser;
+    }
     const byUsername = await this.findByUsername(raw);
     if (byUsername) return byUsername;
 

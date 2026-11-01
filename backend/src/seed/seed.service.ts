@@ -64,7 +64,7 @@ export class SeedService implements OnModuleInit {
     const managerEmp = await this.employees.save(
       this.employees.create({
         employeeCode: 'NV001',
-        fullName: 'Nguyễn Quản Lý',
+        fullName: 'Nguyễn Minh Tuấn',
         email: 'manager@nexora.work',
         phone: '0901000001',
         departmentId: dept.id,
@@ -77,24 +77,25 @@ export class SeedService implements OnModuleInit {
     const employeeEmp = await this.employees.save(
       this.employees.create({
         employeeCode: 'NV002',
-        fullName: 'Trần Nhân Viên',
+        fullName: 'Trần Quốc Bảo',
         email: 'employee@nexora.work',
         phone: '0901000002',
         departmentId: dept.id,
         position: 'Nhân viên',
         hireDate: '2023-03-15',
         status: EmployeeStatus.ACTIVE,
+        managerEmployeeId: managerEmp.id,
       }),
     );
 
     const adminEmp = await this.employees.save(
       this.employees.create({
         employeeCode: 'NV000',
-        fullName: 'Admin Hệ thống',
+        fullName: 'Lê Hoàng Anh',
         email: 'admin@nexora.work',
         phone: '0901000000',
         departmentId: dept.id,
-        position: 'Quản trị',
+        position: 'Quản trị hệ thống',
         hireDate: '2020-01-01',
         status: EmployeeStatus.ACTIVE,
       }),

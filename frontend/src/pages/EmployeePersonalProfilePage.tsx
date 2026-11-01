@@ -102,15 +102,6 @@ function onTimePct(m: EmployeeDetail['metrics']) {
   return Math.round((m.attendanceOnTime / m.attendanceValid) * 1000) / 10;
 }
 
-function requestUpdate(email: string) {
-  const hr = 'hr@nexora.vn';
-  const subject = encodeURIComponent('Yêu cầu cập nhật hồ sơ cá nhân');
-  const body = encodeURIComponent(
-    `Kính gửi HR,\n\nTôi muốn cập nhật thông tin hồ sơ cá nhân (${email}).\n\nChi tiết thay đổi:\n- \n\nTrân trọng.`,
-  );
-  window.location.href = `mailto:${hr}?subject=${subject}&body=${body}`;
-}
-
 export default function EmployeePersonalProfilePage() {
   const { user } = useAuth();
   const [detail, setDetail] = useState<EmployeeDetail | null>(null);
@@ -199,18 +190,6 @@ export default function EmployeePersonalProfilePage() {
             </span>
             {cBadge && <span className="contract">{cBadge}</span>}
           </div>
-        </div>
-        <div className="nx-emp-pf-actions">
-          <button
-            type="button"
-            className="nx-btn-outline"
-            onClick={() => requestUpdate(detail.email)}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-              <path d="M21 15a4 4 0 0 1-4 4H7l-4 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v8Z" />
-            </svg>
-            Yêu cầu cập nhật thông tin
-          </button>
         </div>
       </div>
 

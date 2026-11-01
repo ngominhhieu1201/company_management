@@ -147,11 +147,13 @@
   font: inherit;
 }
 .nx-tk-filters select {
-  border: 1px solid var(--nx-line);
-  border-radius: 10px;
-  padding: 0.45rem 0.7rem;
-  font: inherit;
-  background: #fff;
+  min-width: 9rem;
+}
+
+.nx-tk-pager-size {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 .nx-tk-view {
   display: inline-flex;
@@ -1298,12 +1300,6 @@
   background: transparent;
 }
 .nx-emp-tk-filters select {
-  border: 1px solid var(--nx-line);
-  border-radius: 12px;
-  padding: 0.5rem 0.75rem;
-  font-size: 0.84rem;
-  font-weight: 600;
-  background: #fff;
   min-width: 160px;
 }
 .nx-emp-tk-kanban {

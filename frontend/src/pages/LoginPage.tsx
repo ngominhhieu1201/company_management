@@ -114,7 +114,9 @@ export default function LoginPage() {
     setError('');
     setSubmitting(true);
     try {
-      await login(username.trim(), password, rememberMe);
+      let id = username.trim();
+      if (id.startsWith('@') && !id.slice(1).includes('@')) id = id.slice(1).trim();
+      await login(id, password, rememberMe);
       navigate('/dashboard');
     } catch {
       setError(
@@ -256,11 +258,19 @@ export default function LoginPage() {
               </div>
               <div className="nx-input-wrap">
                 <span className="nx-input-ico" aria-hidden>
-                  @
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                    <circle cx="12" cy="8" r="3.5" stroke="#6F7976" strokeWidth="1.6" />
+                    <path
+                      d="M5 19.5c1.8-3.2 4.2-4.5 7-4.5s5.2 1.3 7 4.5"
+                      stroke="#6F7976"
+                      strokeWidth="1.6"
+                      strokeLinecap="round"
+                    />
+                  </svg>
                 </span>
                 <Form.Control
                   value={username}
-                  onChange={(e) => setUsername(e.target.value)}
+                  onChange={(e) => setUsername(e.target.value.replace(/^\s+/, ''))}
                   placeholder={t.userPh}
                   required
                   autoFocus

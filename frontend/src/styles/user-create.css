@@ -111,8 +111,19 @@
   border-radius: 12px;
   padding: 0.7rem 0.9rem;
   font: inherit;
-  background: #fff;
+  background-color: #fff;
   color: var(--nx-ink-deep);
+}
+
+.nx-uc-select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 2.2rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'%3E%3Cpath d='M1.5 1.75 6 6.25 10.5 1.75' stroke='%236F7976' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.7rem center;
+  background-size: 12px 8px;
+  cursor: pointer;
 }
 
 .nx-uc-select:focus,
